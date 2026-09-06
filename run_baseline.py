@@ -17,7 +17,7 @@ from datetime import datetime, timezone
 
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), "src"))
 
-from cmha_agent import run_batch  # noqa: E402
+from cmha_agent import run_agent_batch, run_batch  # noqa: E402
 from embedder import Embedder  # noqa: E402
 from llm_client import LLMClient  # noqa: E402
 
@@ -40,11 +40,22 @@ def parse_args():
     p.add_argument("--data", default="data/hotpotqa_sample.json", help="Path to the frozen question set.")
     p.add_argument(
         "--strategy",
-        choices=["direct", "single_hyde", "cmha"],
-        default="cmha",
-        help="Retrieval strategy: direct query embedding, single-model HyDE, or full CMHA (default).",
+        choices=["direct", "single_hyde", "cmha", "agent"],
+        default="agent",
+        help=(
+            "direct/single_hyde/cmha are fixed-depth retrieval ablations (no decision-making). "
+            "agent (default) is the actual agentic baseline: CMHA for hop 1, then the model itself "
+            "decides whether to retrieve a targeted second hop before answering."
+        ),
     )
-    p.add_argument("--k", type=int, default=4, help="Number of paragraphs to retrieve per question.")
+    p.add_argument("--k", type=int, default=4, help="Paragraphs retrieved per question (hop 1, for every strategy).")
+    p.add_argument("--k2", type=int, default=2, help="[agent only] additional paragraphs retrieved per follow-up hop.")
+    p.add_argument(
+        "--max-hops",
+        type=int,
+        default=2,
+        help="[agent only] max total hops before forcing an answer. Default 2 matches HotpotQA bridge questions' 2-fact structure.",
+    )
     p.add_argument("--limit", type=int, default=None, help="Only run the first N questions (for a quick smoke test).")
     p.add_argument("--hypothesis-models", default=",".join(DEFAULT_HYPOTHESIS_MODELS), help="Comma-separated model list for CMHA hypothesis generation.")
     p.add_argument("--answer-model", default=DEFAULT_ANSWER_MODEL, help="Model used for the final answer-generation call.")
@@ -104,15 +115,27 @@ def main():
         # swap-time reduction (see README "Local models and RAM budget"). Previously
         # completed questions from an earlier, interrupted run are still preserved —
         # only the remaining `todo_items` are recomputed.
-        new_records = run_batch(
-            todo_items,
-            embedder=embedder,
-            llm=llm,
-            hypothesis_models=hypothesis_models,
-            answer_model=args.answer_model,
-            k=args.k,
-            strategy=args.strategy,
-        )
+        if args.strategy == "agent":
+            new_records = run_agent_batch(
+                todo_items,
+                embedder=embedder,
+                llm=llm,
+                hypothesis_models=hypothesis_models,
+                answer_model=args.answer_model,
+                k1=args.k,
+                k2=args.k2,
+                max_hops=args.max_hops,
+            )
+        else:
+            new_records = run_batch(
+                todo_items,
+                embedder=embedder,
+                llm=llm,
+                hypothesis_models=hypothesis_models,
+                answer_model=args.answer_model,
+                k=args.k,
+                strategy=args.strategy,
+            )
         with open(out_path, "a") as out_f:
             for record in new_records:
                 out_f.write(json.dumps(record) + "\n")
@@ -140,8 +163,16 @@ def main():
         conf = sum(r["confidence"] for r in ok) / len(ok)
         print(f"exact match      : {em:.3f}")
         print(f"token F1         : {f1:.3f}")
-        print(f"retrieval recall : {recall:.3f}  (gold-paragraph hit rate @ k={args.k})")
+        print(f"retrieval recall : {recall:.3f}  (gold-paragraph hit rate)")
         print(f"mean confidence  : {conf:.3f}")
+        if args.strategy == "agent":
+            hops = [r.get("hops_used", 1) for r in ok]
+            second_hop_rate = sum(1 for h in hops if h > 1) / len(ok)
+            reasons = {}
+            for r in ok:
+                reasons[r.get("stop_reason", "?")] = reasons.get(r.get("stop_reason", "?"), 0) + 1
+            print(f"mean hops used   : {sum(hops) / len(hops):.2f}  ({second_hop_rate:.0%} of questions used a 2nd hop)")
+            print(f"stop reasons     : {reasons}")
     if todo_items:
         print(f"elapsed          : {elapsed:.1f}s  ({elapsed / len(todo_items):.1f}s/question, {len(todo_items)} newly run)")
     else:

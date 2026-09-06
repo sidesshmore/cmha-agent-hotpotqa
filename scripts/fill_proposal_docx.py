@@ -3,9 +3,10 @@ CMHA-Agent proposal content. Not part of the baseline pipeline — kept here
 only for provenance/reproducibility of how the .docx was generated.
 
 Usage:
-    python scripts/fill_proposal_docx.py <path-to-docx-copy>
+    python scripts/fill_proposal_docx.py <path-to-blank-template> <path-to-output-docx>
 """
 
+import shutil
 import sys
 
 import docx
@@ -25,7 +26,6 @@ def set_cell_text(cell, text):
         p.runs[0].text = text
     else:
         p.add_run(text)
-    # remove any extra paragraphs the cell might have had
     for extra in cell.paragraphs[1:]:
         delete_paragraph(extra)
 
@@ -36,25 +36,26 @@ def insert_lines(anchor, lines):
         anchor.insert_paragraph_before(text, style=style)
 
 
-def main(path):
-    d = docx.Document(path)
+def main(template_path, out_path):
+    shutil.copy(template_path, out_path)
+    d = docx.Document(out_path)
     paras = list(d.paragraphs)  # snapshot; index-stable for the deletes below
+
+    BODY = "Body Text"
+    BULLET = "Compact"
 
     # ---------- Basic Information table ----------
     t0 = d.tables[0]
     set_cell_text(t0.rows[1].cells[1], "Siddhesh More")
     set_cell_text(
         t0.rows[2].cells[1],
-        "CMHA-Agent: A Confidence-Aware Cross-Model Retrieval Agent for Multi-Hop Question Answering",
+        "CMHA-Agent: An Adaptive Multi-Hop Retrieval Agent for Open-Domain Question Answering",
     )
     set_cell_text(t0.rows[3].cells[1], "https://github.com/sidesshmore/cmha-agent-hotpotqa")
     set_cell_text(
         t0.rows[4].cells[1],
         ".env.example (repo root) and README.md, Setup section — no API key required by default (fully local via Ollama).",
     )
-
-    BODY = "Body Text"
-    BULLET = "Compact"
 
     # ---------- Section 1: Problem Definition (paras 6..15, keep 15 as spacer) ----------
     for i in range(7, 15):
@@ -63,20 +64,17 @@ def main(path):
         paras[15],
         [
             (
-                "The agent reads a multi-hop question together with a pool of candidate evidence "
-                "passages, decides which passages actually support the answer, and returns a short "
-                "answer string plus a numeric confidence score.",
-                BODY,
+                "Task: answer a multi-hop question by retrieving evidence, deciding whether it's enough, "
+                "and retrieving a further targeted hop if not — the continue-vs-answer decision is the "
+                "agentic behavior being proposed. User: someone building QA over a document collection who "
+                "needs multi-fact questions answered and needs the system to know when it lacks evidence.",
+                BULLET,
             ),
-            ("- Task: retrieve-then-answer over passages that require chaining two separate facts (bridge-type multi-hop QA), not single-paragraph lookup.", BULLET),
-            ("- Intended user: someone building a QA assistant over a document collection (research literature, internal docs, etc.) who needs the system to work on questions that require connecting two facts, and to know when it doesn't know.", BULLET),
-            ("- Input: a natural-language question plus a pool of candidate paragraphs (in this baseline, HotpotQA's own 10-paragraph distractor set per question; in a later phase, a larger real document corpus).", BULLET),
-            ("- Output: a short answer string, the titles of the paragraphs used as evidence, and a confidence score in [0,1].", BULLET),
+            ("- Input: a question + a pool of candidate paragraphs (HotpotQA's 10-paragraph set per question here; a larger corpus later).", BULLET),
+            ("- Output: a short answer, the evidence actually used (possibly across 2 hops), why it stopped, and a confidence score.", BULLET),
             (
-                "- Success: the answer matches the gold answer (exact match / F1) AND confidence tracks correctness "
-                "(high confidence should coincide with correct answers, low confidence with incorrect ones — "
-                "measurable via correlation, not just accuracy alone). Failure: a wrong answer, or worse, a "
-                "confidently wrong answer.",
+                "- Success: correct answer (EM/F1) AND a sound stopping decision (takes a 2nd hop only when "
+                "hop-1 evidence is genuinely incomplete). Failure: wrong answer, or a confident wrong answer.",
                 BULLET,
             ),
         ],
@@ -89,35 +87,25 @@ def main(path):
         paras[24],
         [
             (
-                "Multi-hop QA is where retrieval-augmented systems actually break in practice: many real "
-                "questions (\"who is the CEO of the company that acquired X\") need chaining facts across "
-                "documents, and single-vector dense retrieval famously struggles here. My own prior work "
-                "(“Beyond HyDE”) found that every single-model HyDE retrieval variant tested actually "
-                "degrades accuracy below a no-retrieval baseline on multi-hop questions — this project "
-                "closes the loop that paper left open by measuring whether cross-model retrieval improves the "
-                "final answer, not just what gets retrieved.",
+                "Multi-hop QA is where RAG systems break in practice — my own prior work (“Beyond HyDE”) "
+                "found every single-model HyDE variant tested degrades accuracy below no-retrieval on "
+                "multi-hop questions. A fixed-depth retriever can't adapt: some questions need one paragraph, "
+                "others need a second chained fact the first pass misses.",
                 BODY,
             ),
             (
-                "- Why agentic: the right amount of retrieval effort is not fixed per question — some need one "
-                "paragraph, others need evidence chained across documents. An agent that adaptively decides how "
-                "much evidence to gather, and whether to abstain when uncertain, is a genuine control-flow "
-                "problem, not a fixed pipeline.",
+                "- Why agentic: this is control flow, not a fixed pipeline — observe evidence, decide if it's "
+                "enough, act. Already measured, not just planned: with an identical hop-1 retrieval, letting "
+                "the model decide whether to take a 2nd hop raised exact match from 0.400 to 0.600 on a real "
+                "10-question run (Section 6).",
                 BULLET,
             ),
             (
-                "- In scope this semester: single-hop CMHA retrieval → generation → confidence estimate "
-                "(built as this proposal's baseline); an adaptive stopping/second-hop retrieval policy (the "
-                "actual agent-loop contribution — decide from confidence whether to retrieve again); a "
-                "larger, paired-significance-tested evaluation on HotpotQA.",
+                "- In scope: the adaptive stopping policy (built, measured); a larger significance-tested "
+                "evaluation; improving the sufficiency-check's format reliability (a real observed failure — Section 7).",
                 BULLET,
             ),
-            (
-                "- Out of scope: building a new document corpus/index from scratch, fine-tuning any model, "
-                "production-grade serving, and live web tool-use (GAIA-style search) — flagged only as a "
-                "possible stretch goal if time allows.",
-                BULLET,
-            ),
+            ("- Out of scope: a new corpus/index, fine-tuning, production serving, live web tool-use (stretch goal only).", BULLET),
         ],
     )
 
@@ -128,41 +116,35 @@ def main(path):
         paras[38],
         [
             (
-                "This is a tool-use/workflow baseline: a retrieval step (Cross-Model Hypothesis Aggregation, "
-                "CMHA) feeding a generation step, running entirely on local open-weight models via Ollama — "
-                "no API key, no cloud dependency, and every model chosen to fit comfortably under 8GB RAM.",
+                "Tool-use/workflow baseline built around a real agent loop (observe → decide → act → repeat, "
+                "bounded), running entirely on local open-weight models via Ollama — no API key, no cloud "
+                "dependency, every model under 8GB RAM.",
                 BODY,
             ),
             (
-                "- Models/tools: four small open-weight LLMs served by Ollama for cross-model hypothesis "
-                "generation (qwen2.5:3b, llama3.2:3b, gemma2:2b, phi3.5:3.8b — chosen to mirror the "
-                "Alibaba/Meta/Google/Mistral-family organizational diversity of the original CMHA paper), "
-                "nomic-embed-text (also via Ollama) for embeddings, and one of the four models for final "
-                "answer generation. Plain Python + numpy for the retrieval math; no PyTorch, no GPU required.",
+                "- Models: 4 small LLMs for cross-model hop-1 hypotheses (qwen2.5:3b, llama3.2:3b, gemma2:2b, "
+                "phi3.5:3.8b — mirroring Beyond-HyDE's org diversity), nomic-embed-text for embeddings, one "
+                "model for the sufficiency check/follow-up/final answer. Plain Python + numpy; no PyTorch, no GPU.",
                 BULLET,
             ),
             (
-                "- Step by step: (1) each of the 4 models generates a short hypothetical answer passage for the "
-                "question; (2) every hypothesis and every candidate paragraph is embedded; (3) the centroid of "
-                "the 4 hypothesis embeddings ranks the paragraphs by cosine similarity; (4) the top-k paragraphs "
-                "are handed to an answer-generation call; (5) the predicted answer is scored (EM/F1) and a "
-                "confidence score is derived from how much the 4 hypotheses agreed with each other.",
+                "- Steps: (1) 4 models generate hop-1 hypotheses; (2) their embedding centroid ranks "
+                "paragraphs (= hop-1 evidence, identical to the cmha ablation); (3) agent judges if that's "
+                "enough to answer; (4) if not, names the missing fact, retrieves a targeted 2nd hop "
+                "(excluding seen paragraphs), re-checks — capped at 2 hops (HotpotQA bridge questions need "
+                "exactly two facts); (5) final answer generated and scored (EM/F1) with a confidence score.",
                 BULLET,
             ),
             (
-                "- Why reasonable: it operationalizes and extends a retrieval method I already built and "
-                "validated in peer-reviewed work (Beyond HyDE) rather than starting from an untested idea, "
-                "reuses a validated confidence proxy (the same diversity score that predicted per-query "
-                "difficulty at r=−0.53 in that paper) instead of inventing an uncalibrated one, and the code "
-                "already runs the three conditions (direct query / single-model HyDE / full CMHA) the "
-                "semester's evaluation plan needs.",
+                "- Why reasonable: extends peer-reviewed retrieval work (Beyond HyDE) rather than an untested "
+                "idea, reuses a validated confidence proxy (r=−0.53 there), and the loop is already measurably "
+                "working — +20pp exact match over identical hop-1 retrieval once the model can ask for more evidence.",
                 BULLET,
             ),
             (
-                "- Files: run_baseline.py (entry point); src/cmha_agent.py (retrieval + generation pipeline); "
-                "src/embedder.py and src/llm_client.py (local Ollama clients); src/hotpot_metrics.py (EM/F1 "
-                "scoring); data/hotpotqa_sample.json (30 frozen real HotpotQA questions). Full repo: "
-                "https://github.com/sidesshmore/cmha-agent-hotpotqa",
+                "- Files: run_baseline.py (entry, --strategy agent/cmha/single_hyde/direct); "
+                "src/cmha_agent.py (run_agent_batch = agent loop); src/embedder.py, src/llm_client.py (Ollama "
+                "clients); data/hotpotqa_sample.json. Repo: https://github.com/sidesshmore/cmha-agent-hotpotqa",
                 BULLET,
             ),
         ],
@@ -175,43 +157,37 @@ def main(path):
         paras[47],
         [
             (
-                "Sample input: “Which American film director hosted the 18th Independent Spirit Awards in "
-                "2002?” — a real HotpotQA validation-set bridge question (id 5ac3165c5542995ef918c10a), "
-                "given with its full 10-paragraph distractor pool.",
+                "Case A (1 hop, real run): “Which American film director hosted the 18th Independent Spirit "
+                "Awards in 2002?” (gold: “John Waters”). Output: “John Waters”, EM=1.0, F1=1.0, "
+                "retrieval_recall=1.0, hops_used=1, stop_reason=“sufficient”. All 4 hop-1 models individually "
+                "hallucinated a different wrong host — centroid retrieval still found the right evidence, and "
+                "the agent correctly judged 1 hop was enough.",
                 BULLET,
             ),
             (
-                "Expected behavior: the agent should retrieve both gold-supporting paragraphs (“18th "
-                "Independent Spirit Awards” and “John Waters”) out of the 10 candidates and answer "
-                "“John Waters.”",
+                "Case B (2 hops, real run): “What movie did Pitof direct which had an action-adventure tie-in "
+                "video game based off of it in 2004?” (gold: “Catwoman”). Hop 1 was insufficient; the agent "
+                "named the missing fact, retrieved a targeted 2nd hop, recovered the 2 paragraphs hop-1 "
+                "missed, and answered correctly: EM=1.0, hops_used=2.",
                 BULLET,
             ),
             (
-                "Actual output (real run, not mocked): predicted_answer = “John Waters” (EM = 1.0, F1 = "
-                "1.0), retrieval_recall = 1.0 (both gold paragraphs retrieved in the top-4), confidence = 0.838. "
-                "Full JSON record: examples/test_case_real_output.jsonl in the repository.",
-                BULLET,
-            ),
-            (
-                "[SCREENSHOT PLACEHOLDER — paste a terminal screenshot here of: "
-                "`python run_baseline.py --strategy cmha --limit 1` producing the output above. "
-                "See examples/test_case.md in the repo for the exact reproduction command.]",
+                "[SCREENSHOT PLACEHOLDER — terminal screenshot of Case A: "
+                "`python run_baseline.py --strategy agent --limit 1`. Exact reproduction command in "
+                "examples/test_case.md.]",
                 BODY,
             ),
             (
-                "What worked: even though all four individual hypothesis models hallucinated a different wrong "
-                "host name (Kevin Smith, Jon Favreau, Quentin Tarantino, Spike Jonze), the cross-model centroid "
-                "still retrieved the correct evidence, and the answer model correctly read the true answer off "
-                "that evidence rather than trusting any single model's guess — concrete, real evidence for "
-                "the cross-model-retrieval thesis, not just a citation of the original paper's claim.",
+                "What worked: both cases are real, unedited output — evidence that cross-model retrieval "
+                "survives individual hallucination, and that the 2nd-hop mechanism recovers evidence a "
+                "fixed-depth retriever would miss.",
                 BODY,
             ),
             (
-                "What didn't: on a slightly larger real comparison (n=10 questions), full CMHA (EM 0.400) did "
-                "not clearly beat the cheaper single-model-HyDE ablation (EM 0.500) — an honest, inconclusive "
-                "result at this small sample size and with much smaller local models than the original paper "
-                "used. This is exactly why Section 6's evaluation plan calls for a paired significance test on a "
-                "larger sample rather than trusting a point estimate.",
+                "What didn't: the sufficiency check's format isn't always followed by these small models — one "
+                "run had a model echo the prompt's own instructions back as its \"missing fact\" (parser "
+                "degrades safely, but that follow-up query was useless). At n=10, the fixed-depth ablations "
+                "alone don't show a clean cmha-over-single_hyde win — see Section 6.",
                 BODY,
             ),
         ],
@@ -223,34 +199,17 @@ def main(path):
     insert_lines(
         paras[59],
         [
+            ("- Dependencies: Python 3.10+; requirements.txt (requests, numpy only); Ollama with 5 small models pulled once (~8GB disk, one-time).", BULLET),
+            ("- API keys: none required — everything runs locally. Optional remote-endpoint override documented in .env.example.", BULLET),
+            ("- Command: python run_baseline.py --strategy agent --limit 10 (default strategy; drop --limit for all 30). --mock available for a zero-dependency smoke test.", BULLET),
+            ("- Input: data/hotpotqa_sample.json (frozen, in repo). Output: results/<strategy>_<timestamp>.jsonl, one record per question.", BULLET),
             (
-                "- Dependencies: Python 3.10+; pip packages in requirements.txt (requests, numpy — no "
-                "PyTorch, no openai SDK, deliberately minimal); Ollama (local LLM server, https://ollama.com) with 5 small models pulled once "
-                "(~8GB disk, one-time download).",
+                "- Setup limitations: ~8GB one-time model download; hop-1 models are batched to minimize "
+                "swap overhead, but the adaptive loop is sequential per question, so a full agent run over 30 "
+                "questions takes ~7–8 minutes (documented in README.md).",
                 BULLET,
             ),
-            (
-                "- API keys / env vars: none required by default — everything runs locally. An optional "
-                "LLM_BASE_URL / LLM_API_KEY override is documented in .env.example only if you'd rather point "
-                "the chat calls at a remote OpenAI-compatible endpoint instead.",
-                BULLET,
-            ),
-            (
-                "- Exact command: python run_baseline.py --strategy cmha --limit 10 (drop --limit for the full "
-                "30-question set). A --mock flag is available for a zero-dependency pipeline smoke test that "
-                "needs neither Ollama nor any models installed.",
-                BULLET,
-            ),
-            ("- Input location: data/hotpotqa_sample.json (frozen, checked into the repo).", BULLET),
-            ("- Output location: results/<strategy>_<timestamp>.jsonl — one JSON record per question.", BULLET),
-            (
-                "- Known setup limitations: the first run downloads ~8GB of Ollama models (one-time, needs "
-                "internet once); each model swap costs ~3–5s so a full CMHA run over 30 questions takes "
-                "~6 minutes (mitigated in the code by batching calls model-major rather than per-question — "
-                "documented in README.md).",
-                BULLET,
-            ),
-            ("Full step-by-step setup, command reference, and troubleshooting: see README.md in the repository.", BODY),
+            ("Full setup, commands, troubleshooting: README.md in the repository.", BODY),
         ],
     )
 
@@ -261,36 +220,23 @@ def main(path):
         paras[73],
         [
             (
-                "The baseline already runs three conditions with one flag change — direct query, "
-                "single-model HyDE, and full CMHA — which is the core comparison for evaluating any future "
-                "improvement:",
+                "Four conditions, one flag change: direct, single_hyde, cmha (fixed-depth) vs. agent "
+                "(adaptive) — the core comparison for this proposal's claim that adaptive stopping, not just "
+                "better retrieval, improves multi-hop QA. Real n=10 result: direct EM 0.400, single_hyde 0.500, "
+                "cmha 0.400, agent 0.600 (retrieval recall 0.850, 60% used a 2nd hop). Since agent's hop 1 is "
+                "identical to cmha's, the 0.400→0.600 gap isolates the agent's own decision-making from the "
+                "retrieval method underneath it.",
                 BODY,
             ),
-            ("- Task correctness: exact match and token F1 against gold HotpotQA answers.", BULLET),
-            ("- Retrieval quality: recall of the gold supporting-paragraph titles at k=4.", BULLET),
+            ("- Task correctness (EM/F1) and retrieval recall across all four strategies.", BULLET),
+            ("- Agent-specific: hops_used distribution, stop-reason breakdown, and whether hops_used correlates with correctness (i.e. is the 2nd hop triggered on questions that actually need it).", BULLET),
+            ("- Calibration: confidence vs. correctness correlation (reusing Beyond-HyDE's validated r=−0.53 statistic).", BULLET),
+            ("- Cost: LLM calls/question (1/2/5/5–7) and wall-clock time, since any gain must be weighed against real extra compute.", BULLET),
             (
-                "- Calibration: correlation between the confidence score and per-question correctness (reusing "
-                "the same statistic Beyond-HyDE validated at r=−0.53 for difficulty prediction).",
+                "- Statistical rigor: n=10 isn't enough to trust these point estimates (single_hyde already "
+                "flips against the original paper's finding at this size) — the full evaluation uses a paired "
+                "bootstrap/significance test, following my prior work (Transfer or Noise?).",
                 BULLET,
-            ),
-            (
-                "- Cost: LLM calls per question (direct=1, single_hyde=2, cmha=5) and wall-clock time — "
-                "already logged by the pipeline, since CMHA's accuracy gain (if any) has to be weighed against "
-                "a real 4–5x compute cost.",
-                BULLET,
-            ),
-            (
-                "- Statistical rigor: because a small-sample run already produced a counter-intuitive result "
-                "(single-hyde edging out full CMHA at n=10), any later claim that an improved system beats this "
-                "baseline will use a paired bootstrap / significance test over a larger question set, following "
-                "the same protocol as my prior work (Transfer or Noise?), rather than a bare point estimate.",
-                BULLET,
-            ),
-            (
-                "Later, once the adaptive multi-hop stopping policy is built, an LLM-as-judge or human-rated "
-                "qualitative check will be added to evaluate whether the agent's decisions to re-retrieve (or "
-                "abstain) are themselves reasonable, not just whether the final answer is correct.",
-                BODY,
             ),
         ],
     )
@@ -302,41 +248,28 @@ def main(path):
         paras[82],
         [
             (
-                "- Known weaknesses: single-hop only right now (no adaptive re-retrieval yet); the confidence "
-                "proxy is a validated correlate from prior work but not calibrated on this exact pipeline/dataset; "
-                "small local models likely hallucinate more uniformly than the much larger models used in "
-                "Beyond HyDE, which may explain why CMHA's advantage wasn't clean at n=10; results are written "
-                "once per run rather than flushed per question, so a crash mid-run loses the whole in-flight batch.",
+                "- Weaknesses: small models don't reliably follow the sufficiency check's format (observed "
+                "real failure — Section 4); max_hops fixed at 2 (justified for HotpotQA, won't generalize "
+                "elsewhere); follow-up hop uses 1 model not the 4-way ensemble (cost tradeoff, untested "
+                "accuracy cost); results flush once per run, not per question.",
                 BULLET,
             ),
+            ("- Expected failures: model confidently misjudges hop-1 as sufficient; a 2nd-hop query built on a wrong guess about what's missing.", BULLET),
             (
-                "- Expected failure cases: bridging-entity questions where the first hop is already wrong "
-                "(documented in Beyond-HyDE's own error analysis); questions needing information absent from "
-                "the given paragraph pool entirely.",
+                "- Next: the larger significance-tested evaluation (Section 6); more reliable sufficiency-check "
+                "parsing/model; possibly a larger corpus or live tool-use (GAIA-style) as a stretch goal.",
                 BULLET,
             ),
-            (
-                "- Next phase: build the adaptive stopping/second-hop retrieval policy (the actual agent-loop "
-                "contribution); run the larger, paired-significance-tested evaluation from Section 6; possibly "
-                "extend to a larger real document corpus or live tool-use (GAIA-style search) as a stretch goal.",
-                BULLET,
-            ),
-            (
-                "- Risks: small local models may put a hard ceiling on achievable accuracy regardless of "
-                "pipeline improvements; the larger evaluation needs careful compute-time budgeting.",
-                BULLET,
-            ),
-            (
-                "- Help/resources: ASU Sol HPC access (already available via an existing group allocation) if "
-                "scaling past small local models becomes necessary for the multi-hop extension.",
-                BULLET,
-            ),
+            ("- Risks: small models may cap achievable accuracy and format-following regardless of pipeline improvements; larger eval needs compute-time budgeting given the agent's per-question sequential loop.", BULLET),
+            ("- Help/resources: ASU Sol HPC access (existing group allocation) if scaling past small local models is needed.", BULLET),
         ],
     )
 
-    d.save(path)
-    print(f"Saved: {path}")
+    d.save(out_path)
+    print(f"Saved: {out_path}")
 
 
 if __name__ == "__main__":
-    main(sys.argv[1] if len(sys.argv) > 1 else "/Users/sidessh/Agentic-AI/CSE598-capstone-proposal-Siddhesh-More.docx")
+    template = sys.argv[1] if len(sys.argv) > 1 else "/Users/sidessh/Agentic-AI/CSE598-capstone-proposal-template.docx"
+    out = sys.argv[2] if len(sys.argv) > 2 else "/Users/sidessh/Agentic-AI/CSE598-capstone-proposal-Siddhesh-More.docx"
+    main(template, out)

@@ -5,11 +5,21 @@ This is the retrieval half (Cross-Model Hypothesis Aggregation, CMHA) from
 exact-match/F1 rather than only Recall@K. See ../README.md for the full
 Problem Definition / Motivation this baseline supports.
 
-Three --strategy modes let a single script reproduce the three-way
+Four --strategy modes. Three are fixed-depth ablations that reproduce the
 comparison the proposal's evaluation plan needs:
   - direct : embed the raw question (no LLM call at retrieval time)
   - single_hyde : one LLM generates one hypothesis, embed that
   - cmha : N diverse LLMs each generate a hypothesis; embed the centroid
+
+The fourth is the actual agent — the others are baselines/ablations for it:
+  - agent : runs CMHA for hop 1, then loops — the model itself judges
+    whether the retrieved evidence is sufficient; if not, it names what
+    fact is still missing, a follow-up query is retrieved for that specific
+    gap, and the check repeats (bounded by --max-hops, default 2, chosen
+    because HotpotQA's bridge questions are constructed as exactly 2-hop —
+    see run_agent_batch()). This is the part that makes this a genuine
+    agent loop (observe → decide → act → repeat) rather than a fixed
+    retrieve-once-generate-once RAG pipeline.
 
 Pipeline is staged MODEL-MAJOR, not question-major: every call to model X
 across all questions happens before we move to model Y. Ollama loads one
@@ -49,6 +59,23 @@ ANSWER_PROMPT = (
     "Evidence:\n{evidence}\n\n"
     "Question: {q}\n"
     "Answer:"
+)
+
+SUFFICIENCY_PROMPT = (
+    "You are deciding whether the evidence below is enough to answer the "
+    "question confidently — do not guess if it isn't.\n\n"
+    "Evidence:\n{evidence}\n\n"
+    "Question: {q}\n\n"
+    "Respond in EXACTLY this two-line format, nothing else:\n"
+    "STATUS: SUFFICIENT or INSUFFICIENT\n"
+    "MISSING: a short phrase naming the one specific fact or entity still "
+    "needed to answer (write NONE if STATUS is SUFFICIENT)"
+)
+
+FOLLOWUP_HYPOTHESIS_PROMPT = (
+    "Write one short sentence, as if it appeared in a Wikipedia article, "
+    "that states the fact below. Write only the sentence, no preamble.\n\n"
+    "Fact needed: {missing}"
 )
 
 
@@ -118,24 +145,68 @@ def _embed_hypotheses(hyps_by_id: dict, embedder: Embedder) -> dict:
     return {iid: vecs[s:e] for iid, (s, e) in spans.items()}
 
 
+def _rank_indices(para_vecs: np.ndarray, query_vec: np.ndarray, k: int, exclude: set | None = None) -> list[int]:
+    sims = para_vecs @ query_vec
+    if exclude:
+        sims = sims.copy()
+        for idx in exclude:
+            sims[idx] = -np.inf
+    order = np.argsort(-sims)[:k]
+    return [int(i) for i in order if np.isfinite(sims[i])]
+
+
+def _build_evidence(item: dict, indices: list[int]) -> dict:
+    paragraphs = item["paragraphs"]
+    retrieved = [paragraphs[i] for i in indices]
+    retrieved_titles = [p["title"] for p in retrieved]
+    gold_titles = set(item["gold_titles"])
+    recall = len(set(retrieved_titles) & gold_titles) / len(gold_titles) if gold_titles else 0.0
+    return {
+        "retrieved_titles": retrieved_titles,
+        "gold_titles": sorted(gold_titles),
+        "retrieval_recall": round(recall, 4),
+        "evidence_block": "\n\n".join(f"[{p['title']}] {p['text']}" for p in retrieved),
+    }
+
+
 def _retrieve(items: list[dict], para_vecs_by_id: dict, query_vec_by_id: dict, k: int) -> dict:
     out = {}
     for item in items:
         iid = item["id"]
-        paragraphs = item["paragraphs"]
-        sims = para_vecs_by_id[iid] @ query_vec_by_id[iid]
-        order = np.argsort(-sims)[:k]
-        retrieved = [paragraphs[i] for i in order]
-        retrieved_titles = [p["title"] for p in retrieved]
-        gold_titles = set(item["gold_titles"])
-        recall = len(set(retrieved_titles) & gold_titles) / len(gold_titles) if gold_titles else 0.0
-        out[iid] = {
-            "retrieved_titles": retrieved_titles,
-            "gold_titles": sorted(gold_titles),
-            "retrieval_recall": round(recall, 4),
-            "evidence_block": "\n\n".join(f"[{p['title']}] {p['text']}" for p in retrieved),
-        }
+        idx = _rank_indices(para_vecs_by_id[iid], query_vec_by_id[iid], k)
+        out[iid] = _build_evidence(item, idx)
     return out
+
+
+def _parse_sufficiency(text: str) -> tuple[bool, str | None]:
+    """Parses the two-line STATUS/MISSING format, defensively.
+
+    Small local models don't always follow a format exactly, so an
+    unrecognizable response defaults to "sufficient" (stop) rather than
+    "insufficient" (loop again) — a parse failure should end the loop, not
+    silently burn an extra hop on a response we can't act on.
+    """
+    status_line, missing_line = "", ""
+    for line in text.splitlines():
+        upper = line.strip().upper()
+        if upper.startswith("STATUS"):
+            status_line = upper
+        elif upper.startswith("MISSING"):
+            missing_line = line.strip()
+
+    if "INSUFFICIENT" in status_line:
+        is_sufficient = False
+    elif "SUFFICIENT" in status_line:
+        is_sufficient = True
+    else:
+        is_sufficient = True  # unrecognized format — stop rather than loop blindly
+
+    missing = None
+    if not is_sufficient and ":" in missing_line:
+        candidate = missing_line.split(":", 1)[1].strip()
+        if candidate and candidate.upper() != "NONE":
+            missing = candidate
+    return is_sufficient, missing
 
 
 def _generate_answers(items: list[dict], evidence_by_id: dict, llm: LLMClient, answer_model: str, errors: dict) -> dict:
@@ -232,5 +303,158 @@ def run_batch(
         }
         if iid in errors:
             record["partial_errors"] = errors[iid]  # e.g. one of four hypothesis models failed but answer still succeeded
+        results.append(record)
+    return results
+
+
+def run_agent_batch(
+    items: list[dict],
+    embedder: Embedder,
+    llm: LLMClient,
+    hypothesis_models: list[str],
+    answer_model: str,
+    k1: int,
+    k2: int,
+    max_hops: int,
+) -> list[dict]:
+    """The actual agent: adaptive multi-hop CMHA retrieval with a real stopping
+    decision, not a fixed pipeline.
+
+    Hop 1 is identical to `--strategy cmha` (batched, model-major, across all
+    questions at once — see run_batch/module docstring for why). From there,
+    each question runs its own loop: ask the model whether the accumulated
+    evidence is sufficient; if not, retrieve k2 more paragraphs targeted at
+    whatever fact it says is missing; repeat up to max_hops total hops. This
+    part is necessarily sequential per question (hop count is data-dependent
+    — that's what makes it an agent loop rather than a fixed-depth pipeline),
+    but every call inside it uses the SAME `answer_model`, loaded once for
+    the whole loop across every question, so it doesn't reintroduce the
+    per-question model-swap cost this file's docstring describes avoiding.
+
+    max_hops defaults to 2 because HotpotQA's bridge-type questions are
+    constructed to require exactly two supporting facts — a third hop
+    shouldn't be needed by the dataset's own design, not an arbitrary cutoff.
+    """
+    errors: dict = {}
+
+    # --- Hop 1: identical batched CMHA retrieval to `run_batch(strategy="cmha")` ---
+    para_vecs_by_id = _embed_paragraphs(items, embedder)
+    hyps_by_id = _generate_hypotheses(items, llm, hypothesis_models, errors)
+    hyp_vecs_by_id = _embed_hypotheses(hyps_by_id, embedder)
+
+    query_vec_by_id: dict = {}
+    diversity_by_id: dict = {}
+    fallback_needed = [item for item in items if len(hyp_vecs_by_id[item["id"]]) == 0]
+    if fallback_needed:
+        query_vec_by_id.update(_embed_questions(fallback_needed, embedder))
+    for item in items:
+        iid = item["id"]
+        if iid in query_vec_by_id:
+            diversity_by_id[iid] = 0.0
+            continue
+        vecs = hyp_vecs_by_id[iid]
+        query_vec_by_id[iid] = _centroid(vecs)
+        diversity_by_id[iid] = _diversity_score(vecs)
+
+    hop1_idx_by_id = {
+        item["id"]: _rank_indices(para_vecs_by_id[item["id"]], query_vec_by_id[item["id"]], k1) for item in items
+    }
+
+    # --- Adaptive loop: sequential per question, but one model stays loaded for all of it ---
+    print(f"[agent-loop] {answer_model}: adaptive retrieve+decide+answer for {len(items)} questions (max_hops={max_hops})...")
+    results = []
+    for n, item in enumerate(items, 1):
+        iid = item["id"]
+        accumulated_idx = list(hop1_idx_by_id[iid])
+        hops_used = 1
+        stop_reason = "max_hops_reached"
+        followup_queries: list[str] = []
+
+        for hop in range(2, max_hops + 1):
+            evidence = _build_evidence(item, accumulated_idx)
+            try:
+                check = llm.complete(
+                    answer_model,
+                    SUFFICIENCY_PROMPT.format(evidence=evidence["evidence_block"], q=item["question"]),
+                    max_tokens=60,
+                    temperature=0.0,
+                )
+                is_sufficient, missing = _parse_sufficiency(check)
+            except Exception as e:
+                errors.setdefault(iid, []).append(f"sufficiency[hop{hop}]: {e}")
+                is_sufficient, missing = True, None  # fail safe: stop the loop rather than retry blindly
+
+            if is_sufficient or not missing:
+                stop_reason = "sufficient" if is_sufficient else "no_missing_fact_named"
+                break
+
+            followup_queries.append(missing)
+            try:
+                followup_hyp = llm.complete(
+                    answer_model,
+                    FOLLOWUP_HYPOTHESIS_PROMPT.format(missing=missing),
+                    max_tokens=60,
+                    temperature=0.7,
+                )
+                followup_vec = embedder.embed([followup_hyp])[0]
+            except Exception as e:
+                errors.setdefault(iid, []).append(f"followup[hop{hop}]: {e}")
+                stop_reason = "followup_call_failed"
+                break
+
+            new_idx = _rank_indices(para_vecs_by_id[iid], followup_vec, k2, exclude=set(accumulated_idx))
+            if not new_idx:
+                stop_reason = "no_more_paragraphs_available"
+                break
+            accumulated_idx.extend(new_idx)
+            hops_used = hop
+
+        evidence = _build_evidence(item, accumulated_idx)
+        try:
+            predicted = llm.complete(
+                answer_model,
+                ANSWER_PROMPT.format(evidence=evidence["evidence_block"], q=item["question"]),
+                max_tokens=32,
+                temperature=0.0,
+            )
+        except Exception as e:
+            errors.setdefault(iid, []).append(f"answer: {e}")
+            predicted = None
+
+        if n % 10 == 0 or n == len(items):
+            print(f"    {n}/{len(items)}")
+
+        if predicted is None:
+            results.append(
+                {
+                    "id": iid,
+                    "question": item["question"],
+                    "error": "; ".join(errors.get(iid, ["unknown error"])),
+                    "strategy": "agent",
+                }
+            )
+            continue
+
+        confidence = 1.0 / (1.0 + diversity_by_id[iid])
+        record = {
+            "id": iid,
+            "question": item["question"],
+            "gold_answer": item["answer"],
+            "predicted_answer": predicted,
+            "em": exact_match_score(predicted, item["answer"]),
+            "f1": round(f1_score(predicted, item["answer"]), 4),
+            "retrieval_recall": evidence["retrieval_recall"],
+            "retrieved_titles": evidence["retrieved_titles"],
+            "gold_titles": evidence["gold_titles"],
+            "diversity_score": round(diversity_by_id[iid], 4),
+            "confidence": round(confidence, 4),
+            "hypotheses": hyps_by_id.get(iid, []),
+            "hops_used": hops_used,
+            "stop_reason": stop_reason,
+            "followup_queries": followup_queries,
+            "strategy": "agent",
+        }
+        if iid in errors:
+            record["partial_errors"] = errors[iid]
         results.append(record)
     return results
