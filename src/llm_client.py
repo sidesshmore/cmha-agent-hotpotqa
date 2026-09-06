@@ -1,26 +1,31 @@
-"""Thin OpenAI-compatible chat client with retry + a mock mode.
+"""Thin OpenAI-compatible chat client (plain HTTP, no openai SDK) + a mock mode.
 
 Defaults to a local Ollama server (http://localhost:11434/v1), which needs
 no API key and no network access at all. Every value is still env-var
 overridable, so this also works against plain OpenAI, a remote vLLM server,
 or any other OpenAI-compatible endpoint if you'd rather not run models
 locally.
+
+Deliberately uses `requests` instead of the `openai` package: the SDK pulls
+in a large, mostly-unused surface (assistants/threads beta APIs) that can
+take noticeably longer to import on a fresh install than the one endpoint
+(`/chat/completions`) this project actually calls. Since `embedder.py`
+already depends on `requests` for Ollama's native embeddings route, this
+keeps the whole project down to two runtime dependencies (`requests`,
+`numpy`) with no heavy import anywhere.
 """
 
 import os
 import time
 
+import requests
+
 
 class LLMClient:
     def __init__(self, mock: bool = False):
         self.mock = mock
-        if not mock:
-            from openai import OpenAI  # imported lazily so --mock needs no package/server at all
-
-            self.client = OpenAI(
-                base_url=os.environ.get("LLM_BASE_URL", "http://localhost:11434/v1"),
-                api_key=os.environ.get("LLM_API_KEY", "ollama"),  # Ollama ignores this; some clients require non-empty
-            )
+        self.base_url = os.environ.get("LLM_BASE_URL", "http://localhost:11434/v1").rstrip("/")
+        self.api_key = os.environ.get("LLM_API_KEY", "ollama")  # Ollama ignores this; kept for remote-endpoint compatibility
 
     def complete(
         self,
@@ -42,13 +47,19 @@ class LLMClient:
         last_err = None
         for attempt in range(max_retries):
             try:
-                resp = self.client.chat.completions.create(
-                    model=model,
-                    messages=messages,
-                    max_tokens=max_tokens,
-                    temperature=temperature,
+                resp = requests.post(
+                    f"{self.base_url}/chat/completions",
+                    headers={"Authorization": f"Bearer {self.api_key}"},
+                    json={
+                        "model": model,
+                        "messages": messages,
+                        "max_tokens": max_tokens,
+                        "temperature": temperature,
+                    },
+                    timeout=120,
                 )
-                content = resp.choices[0].message.content
+                resp.raise_for_status()
+                content = resp.json()["choices"][0]["message"]["content"]
                 return (content or "").strip()
             except Exception as e:
                 # Ollama can be slow/unresponsive on the first call to a model it

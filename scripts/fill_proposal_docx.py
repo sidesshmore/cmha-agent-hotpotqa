@@ -224,8 +224,8 @@ def main(path):
         paras[59],
         [
             (
-                "- Dependencies: Python 3.10+; pip packages in requirements.txt (openai, requests, numpy — no "
-                "PyTorch); Ollama (local LLM server, https://ollama.com) with 5 small models pulled once "
+                "- Dependencies: Python 3.10+; pip packages in requirements.txt (requests, numpy — no "
+                "PyTorch, no openai SDK, deliberately minimal); Ollama (local LLM server, https://ollama.com) with 5 small models pulled once "
                 "(~8GB disk, one-time download).",
                 BULLET,
             ),
