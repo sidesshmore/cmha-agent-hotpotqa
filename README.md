@@ -160,7 +160,7 @@ Here's a real question from one of my test runs, not something I made up to look
 
 The first search didn't turn up enough — the model recognized that, said out loud what it still needed to know, went and searched again specifically for that, and this time found both "Catwoman (film)" and "Catwoman (video game)," which the first search had completely missed. That's a real decision it made mid-run, not something scripted to happen.
 
-**And an honest failure, from that same batch of runs, that I think is worth showing rather than hiding:** on one question, instead of naming something specific it was missing, one of the smaller models just parroted back the instructions from the prompt itself, word for word, as if that were the missing fact. The code handles this gracefully — it notices the response doesn't make sense and just stops rather than looping forever on garbage — but it's a real reminder that small local models don't always follow instructions the way you'd hope. More in the Limitations section below.
+In that same batch of runs, one question went the other way: instead of naming something specific it was missing, one of the smaller models just parroted back the instructions from the prompt itself, word for word, as if that were the missing fact. The code handles this gracefully — it notices the response doesn't make sense and just stops rather than looping forever on garbage — but it's a real reminder that small local models don't always follow instructions the way you'd hope. More in the Limitations section below.
 
 ### Where everything ends up
 

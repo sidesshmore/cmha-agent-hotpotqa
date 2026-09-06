@@ -54,7 +54,7 @@ def main(template_path, out_path):
     set_cell_text(t0.rows[3].cells[1], "https://github.com/sidesshmore/cmha-agent-hotpotqa")
     set_cell_text(
         t0.rows[4].cells[1],
-        ".env.example (repo root) and README.md, Setup section — no API key required by default (fully local via Ollama).",
+        ".env.example (repo root) and README.md, Setup section. No API key required by default, since it runs fully locally via Ollama.",
     )
 
     # ---------- Section 1: Problem Definition (paras 6..15, keep 15 as spacer) ----------
@@ -64,25 +64,25 @@ def main(template_path, out_path):
         paras[15],
         [
             (
-                "I'm building an agent that answers questions requiring two connected facts — the kind "
-                "where one search isn't enough. It retrieves some evidence, decides for itself whether that's "
-                "actually enough to answer confidently, and if not, figures out what's missing and retrieves "
-                "again before answering. That decision — continue or answer — is the agentic part.",
+                "I'm building an agent that answers questions requiring two connected facts, the kind of "
+                "question where one search isn't enough. It retrieves some evidence, decides for itself "
+                "whether that's actually enough to answer confidently, and if not, figures out what's missing "
+                "and retrieves again before answering. That decision, whether to continue searching or "
+                "answer now, is the agentic part.",
                 BODY,
             ),
             (
-                "The intended user is anyone building a QA system over a document collection who needs "
-                "multi-fact questions handled correctly, and who'd rather the system say \"I need more "
-                "information\" than guess. The input is a question plus a pool of candidate paragraphs "
-                "(HotpotQA supplies 10 per question in this baseline). The output is a short answer, the "
-                "evidence actually used, an account of why it stopped searching when it did, and a "
-                "confidence score.",
+                "The intended user is anyone building QA over a document collection who needs multi-fact "
+                "questions handled correctly, and would rather the system say \"I need more information\" "
+                "than guess. The input is a question plus candidate paragraphs (HotpotQA supplies 10 per "
+                "question here). The output is a short answer, the evidence used, why it stopped searching, "
+                "and a confidence score.",
                 BODY,
             ),
             (
-                "It succeeds when the answer is correct and its stopping decision was sound — taking a "
-                "second look only when the first one genuinely wasn't enough. It fails on a wrong answer, or "
-                "worse, a confidently wrong one.",
+                "It succeeds when the answer is correct and its stopping decision was sound, meaning it took "
+                "a second look only when the first one genuinely wasn't enough. It fails on a wrong answer, "
+                "or worse, a confidently wrong one.",
                 BODY,
             ),
         ],
@@ -96,25 +96,25 @@ def main(template_path, out_path):
         [
             (
                 "Multi-hop questions are exactly where retrieval-augmented systems tend to break. In my own "
-                "earlier work (“Beyond HyDE”), I found that every single-model retrieval variant I tested "
-                "actually did worse than not retrieving at all on multi-hop questions. A retriever that "
-                "always grabs the same fixed number of paragraphs can't adapt to that — some questions really "
-                "do need just one paragraph, and others need a second fact the first search will simply miss.",
+                "earlier work (“Beyond HyDE”), every single-model retrieval variant I tested actually did "
+                "worse than not retrieving at all on multi-hop questions. A retriever that always grabs the "
+                "same fixed number of paragraphs can't adapt: some questions need one paragraph, others need "
+                "a second fact the first search will miss.",
                 BODY,
             ),
             (
-                "That's why this needs to be agentic rather than a fixed pipeline: the system has to look at "
-                "its own evidence, judge whether it's enough, and act on that judgment. And this isn't just a "
-                "plan — I already built and measured it. Using the identical first-round retrieval, letting "
-                "the model decide whether to look again took exact match from 0.400 to 0.600 on a real "
-                "10-question test run (details in Section 6).",
+                "That's why this needs to be agentic rather than a fixed pipeline, and this isn't just a "
+                "plan. Using the identical first-round retrieval, letting the model decide whether to look "
+                "again took exact match from 0.400 to 0.600 on a real 10-question test run, detailed in "
+                "Section 6.",
                 BODY,
             ),
             (
-                "This semester I'm scoping to the adaptive stopping behavior (built and measured), a properly "
-                "sized statistical evaluation, and making the model's \"what's missing\" reports more reliable "
-                "(a real failure case is in Section 7). I'm leaving out a new document collection, fine-tuning, "
-                "production deployment, and live web search — the last one only as a stretch goal.",
+                "This semester I'm scoping to the adaptive stopping behavior, already built and measured, a "
+                "properly sized statistical evaluation, and making the model's reports of what's missing more "
+                "reliable, since a real failure case shows up in Section 7. I'm leaving out a new document "
+                "collection, fine-tuning, production deployment, and live web search, with that last one kept "
+                "only as a possible stretch goal.",
                 BODY,
             ),
         ],
@@ -127,33 +127,34 @@ def main(template_path, out_path):
         paras[38],
         [
             (
-                "This is a tool-use baseline built around an actual agent loop — observe, decide, act, "
-                "repeat, with a limit — and it runs entirely on local, open-weight models through Ollama. No "
-                "API key, no cloud dependency, and every model fits comfortably under 8GB of RAM.",
+                "This is a tool-use baseline built around an actual agent loop, meaning it observes, "
+                "decides, acts, and repeats up to a limit, and it runs entirely on local, open-weight models "
+                "through Ollama. No API key, no cloud dependency, and every model fits comfortably under 8GB "
+                "of RAM.",
                 BODY,
             ),
             (
-                "Four small models (qwen2.5:3b, llama3.2:3b, gemma2:2b, phi3.5:3.8b — chosen to mirror the "
-                "cross-company diversity from Beyond HyDE) each generate a guess at the answer for the first "
-                "search; nomic-embed-text turns text into vectors; and one model handles deciding whether "
-                "evidence is sufficient, writing a follow-up query, and producing the final answer. Everything "
-                "else is plain Python and numpy — no PyTorch, no GPU needed.",
+                "Four small models (qwen2.5:3b, llama3.2:3b, gemma2:2b, phi3.5:3.8b, chosen to mirror the "
+                "cross-company diversity from Beyond HyDE) each guess at the answer for the first search. "
+                "Nomic-embed-text turns text into vectors, and one model decides sufficiency, writes the "
+                "follow-up query, and produces the final answer. Everything else is plain Python and numpy, "
+                "no PyTorch, no GPU.",
                 BODY,
             ),
             (
-                "Concretely: the four models each guess an answer; averaging those guesses ranks the "
-                "candidate paragraphs, giving round-one evidence (identical to the cmha ablation below). The "
-                "agent judges whether that's enough — if not, it names what's missing, retrieves a targeted "
-                "second round excluding paragraphs it's already seen, and checks again, capped at two rounds "
-                "since HotpotQA's questions need exactly two facts. It then answers from whatever evidence it "
-                "has and reports a confidence value.",
+                "Concretely, the four models each guess an answer, and averaging those guesses ranks the "
+                "candidate paragraphs, giving round-one evidence identical to the cmha ablation below. The "
+                "agent judges whether that's enough. If not, it names what's missing, retrieves a targeted "
+                "second round excluding paragraphs already seen, and checks again, capped at two rounds since "
+                "HotpotQA's questions need exactly two facts. It then answers and reports a confidence value.",
                 BODY,
             ),
             (
                 "I think this is reasonable because it builds on retrieval work I already validated in a "
                 "peer-reviewed paper, reuses a confidence measure I already checked correlates with "
-                "correctness, and the agent loop itself is already measurably working — twenty points of exact "
-                "match gained purely by letting the model decide it needs more evidence, from the identical first search.",
+                "correctness, and the agent loop itself is already measurably working: twenty points of exact "
+                "match gained purely by letting the model decide it needs more evidence, from the identical "
+                "first search.",
                 BODY,
             ),
             (
@@ -173,38 +174,37 @@ def main(template_path, out_path):
         [
             (
                 "Test case A, a real run: “Which American film director hosted the 18th Independent Spirit "
-                "Awards in 2002?” (correct answer: John Waters). The agent answered correctly — exact match, "
-                "F1 of 1.0, both supporting paragraphs found after one search. What I find genuinely "
-                "interesting: all four models generating first-round guesses individually named a different "
-                "wrong person (Kevin Smith, Jon Favreau, Quentin Tarantino, Spike Jonze), yet averaging their "
-                "guesses still pointed retrieval at the right evidence, and the agent correctly judged one "
-                "search was enough.",
+                "Awards in 2002?” (correct answer: John Waters). The agent answered correctly, with both "
+                "supporting paragraphs found after one search. Interestingly, all four models individually "
+                "named a different wrong person (Kevin Smith, Jon Favreau, Quentin Tarantino, Spike Jonze), "
+                "yet averaging their guesses still pointed retrieval at the right evidence.",
                 BODY,
             ),
             (
                 "A second real run shows the actual multi-hop behavior firing: “What movie did Pitof direct "
                 "which had an action-adventure tie-in video game based off of it in 2004?” (correct answer: "
-                "Catwoman). The first search wasn't enough; the agent said what it still needed to know, "
+                "Catwoman). The first search wasn't enough, so the agent said what it still needed to know, "
                 "searched again specifically for that, found the two paragraphs the first search had missed, "
                 "and answered correctly.",
                 BODY,
             ),
             (
-                "[SCREENSHOT PLACEHOLDER — a terminal screenshot of test case A, from running "
+                "[SCREENSHOT PLACEHOLDER: a terminal screenshot of test case A, from running "
                 "`python run_baseline.py --strategy agent --limit 1`. Exact steps in examples/test_case.md.]",
                 BODY,
             ),
             (
-                "What worked: both of these are real, unedited output, not constructed to look good — solid "
-                "evidence that averaging several models' guesses can survive every one of them being wrong "
-                "individually, and that the follow-up search genuinely recovers evidence the first pass missed.",
+                "What worked: both of these are real, unedited output, not constructed to look good. That's "
+                "solid evidence that averaging several models' guesses can survive every one of them being "
+                "wrong individually, and that the follow-up search genuinely recovers evidence the first pass "
+                "missed.",
                 BODY,
             ),
             (
                 "What didn't work as cleanly: the model doesn't always describe what's missing in a usable "
-                "way — in one run it just echoed the instructions back instead of naming something real. And "
-                "with only ten questions tested, the simpler retrieval methods alone (without the agent loop) "
-                "don't show a clean winner yet — more on that in Section 6.",
+                "way, and in one run it just echoed the instructions back instead of naming something real. "
+                "With only ten questions tested so far, the simpler retrieval methods alone, without the agent "
+                "loop, also don't show a clean winner yet, which I discuss more in Section 6.",
                 BODY,
             ),
         ],
@@ -218,7 +218,7 @@ def main(template_path, out_path):
         [
             (
                 "You'll need Python 3.10 or newer and Ollama installed (free, runs locally). The Python side "
-                "only needs two small packages — requests and numpy, listed in requirements.txt — and Ollama "
+                "only needs two small packages, requests and numpy, listed in requirements.txt, and Ollama "
                 "needs five small models pulled once, about 8GB total on disk. No API key or account is "
                 "needed anywhere; everything runs on your own machine.",
                 BODY,
@@ -252,12 +252,11 @@ def main(template_path, out_path):
         [
             (
                 "The code already runs four versions with one flag change: three that always retrieve a "
-                "fixed amount and never decide anything, and the actual agent. That comparison is the whole "
-                "point — it tells me whether the gain comes from letting the model decide, not from a better "
-                "retrieval trick. On a real 10-question run: direct 0.400 exact match, single_hyde 0.500, cmha "
-                "0.400, agent 0.600, with 60% of questions triggering a second search. Since the agent's first "
-                "search is identical to cmha's, that 0.400-to-0.600 jump is specifically what the "
-                "decision-making is worth.",
+                "fixed amount and never decide anything, and the actual agent. That comparison tells me "
+                "whether the gain comes from letting the model decide, not from a better retrieval trick. On a "
+                "real 10-question run: direct scored 0.400 exact match, single_hyde 0.500, cmha 0.400, and "
+                "agent 0.600, with 60% of questions triggering a second search. Since the agent's first search "
+                "is identical to cmha's, that jump is specifically what the decision-making is worth.",
                 BODY,
             ),
             (
@@ -268,9 +267,9 @@ def main(template_path, out_path):
                 BODY,
             ),
             (
-                "Most importantly, I want a real statistical test rather than trusting small numbers — ten "
-                "questions already produced one surprising result (single_hyde matching the full method), and "
-                "I don't want to draw conclusions from a sample that small. The full evaluation will use a "
+                "Most importantly, I want a real statistical test rather than trusting small numbers. Ten "
+                "questions already produced one surprising result, with single_hyde matching the full method, "
+                "and I don't want to draw conclusions from a sample that small. The full evaluation will use a "
                 "paired significance test over a much larger question set, the same approach from my earlier work.",
                 BODY,
             ),
@@ -284,12 +283,11 @@ def main(template_path, out_path):
         paras[82],
         [
             (
-                "The biggest honest weakness: the model doesn't always describe what's missing in a usable "
-                "way — small local models aren't perfectly reliable at following that instruction, and I've "
-                "seen it fail already. The two-hop limit is also dataset-specific — it works because "
-                "HotpotQA's questions need exactly two facts, but a general document collection wouldn't "
-                "guarantee that. And the follow-up search uses one model instead of all four, purely to stay "
-                "fast — untested whether that costs accuracy.",
+                "The biggest weakness is that the model doesn't always describe what's missing in a usable "
+                "way. Small local models aren't perfectly reliable at following that instruction, and I've "
+                "already seen it fail. The two-hop limit is also dataset-specific: it works because HotpotQA "
+                "needs exactly two facts, but a general document collection wouldn't guarantee that. And the "
+                "follow-up search uses one model instead of all four, to stay fast.",
                 BODY,
             ),
             (
@@ -300,9 +298,8 @@ def main(template_path, out_path):
             (
                 "Next: the larger statistical evaluation from Section 6, a more reliable sufficiency check, "
                 "and possibly a bigger document collection or live web search if time allows. The main risk is "
-                "that small models may just cap how good this gets, and the larger evaluation needs careful "
-                "time budgeting since the agent reasons about each question individually. I have access to "
-                "ASU's Sol HPC cluster if more compute becomes necessary.",
+                "that small models may just cap how good this gets. I have access to ASU's Sol HPC cluster if "
+                "more compute becomes necessary.",
                 BODY,
             ),
         ],
