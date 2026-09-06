@@ -1,0 +1,28 @@
+{
+  "id": "5ac3165c5542995ef918c10a",
+  "question": "Which American film director hosted the 18th Independent Spirit Awards in 2002?",
+  "gold_answer": "John Waters",
+  "predicted_answer": "John Waters",
+  "em": 1,
+  "f1": 1.0,
+  "retrieval_recall": 1.0,
+  "retrieved_titles": [
+    "18th Independent Spirit Awards",
+    "John Waters",
+    "Mihai M\u0103laimare Jr.",
+    "Independent Spirit Awards"
+  ],
+  "gold_titles": [
+    "18th Independent Spirit Awards",
+    "John Waters"
+  ],
+  "diversity_score": 0.1928,
+  "confidence": 0.8383,
+  "hypotheses": [
+    "The 18th Independent Spirit Awards in 2002 were hosted by Kevin Smith.",
+    "The American film director who hosted the 18th Independent Spirit Awards in 2002 was Jon Favreau.",
+    "Quentin Tarantino hosted the 18th Independent Spirit Awards in 2002.  He brought his signature style and humor to the ceremony, marking a significant moment for independent cinema.",
+    "Spike Jonze was the American film director who hosted the 1lausstindependent spirit awards ceremony in 2002."
+  ],
+  "strategy": "cmha"
+}
