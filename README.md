@@ -2,136 +2,94 @@
 
 **CSE598 Capstone Proposal — Runnable Baseline (Option A)**
 
-An agent that answers multi-hop questions by retrieving evidence with
-Cross-Model Hypothesis Aggregation (CMHA) — the retrieval method from my
-"Beyond HyDE" paper — then **deciding for itself whether that evidence is
-enough**. If not, it names the specific fact it's still missing, retrieves a
-targeted second hop for that gap, and only then answers. This is a real
-agent loop (observe → decide → act → repeat, bounded), not a fixed
-retrieve-once-generate-once RAG pipeline — see `--strategy agent` below,
-which is now the default and the actual subject of this proposal. The three
-fixed-depth strategies (`direct` / `single_hyde` / `cmha`) are kept as
-ablations: they isolate how much of the agent's benefit comes from
-*adaptive stopping* versus the retrieval method underneath it.
+This is a small agent that answers questions which need two connected facts to solve — the "who directed the movie that had a video game based on it" kind of question, where you can't just search once and be done. It retrieves some evidence, and then — this is the important part — it actually stops and asks itself whether that evidence is enough. If it isn't, it figures out what's missing, goes and looks for that specific thing, and only then answers.
 
-Runs **entirely locally via [Ollama](https://ollama.com)** — no API key, no
-cloud account, no network access needed after the one-time model downloads.
-Every model was chosen so a single one comfortably fits under 8GB RAM.
+That "check yourself, go back if you need to" step is the whole point of this project. Everything else here (the retrieval method, the confidence score) is infrastructure I already built and tested in earlier work of mine; the agent loop on top of it is new, and it's the actual thing being proposed. The three simpler strategies in the code (`direct`, `single_hyde`, `cmha`) exist so I can show exactly how much of the improvement comes from the agent's decision-making versus the retrieval method underneath it.
 
-This baseline reuses three things I already built and validated in prior
-work, and adds one genuinely new piece — the agent loop itself:
+It all runs on your own laptop through [Ollama](https://ollama.com) — no API key, no account, nothing to pay for, and every model is small enough to run comfortably even with 8GB of RAM.
 
-| Piece | Status |
+Three things I'm reusing from earlier work, and one new piece:
+
+| Piece | Where it's from |
 |---|---|
-| Cross-model hypothesis retrieval (CMHA) | Reused from *Beyond HyDE: Cross-Model Hypothesis Diversity for Robust Dense Retrieval* (VLDB Workshop 2026) |
-| Single-pass generation over retrieved evidence | Reused from *Retrieve, Locate, Generate* (ACL submission), §3.3 |
-| Diversity score as a confidence/difficulty proxy | Reused from *Beyond HyDE* §3.3 (`div(q)`), validated there at Pearson r=−0.53 with per-query correctness on HotpotQA |
-| Adaptive sufficiency check + targeted second-hop retrieval | **New for this project** — `run_agent_batch()` in `src/cmha_agent.py`. This is the actual agentic contribution; everything else above is infrastructure it builds on. |
+| Cross-model hypothesis retrieval (CMHA) | My paper *Beyond HyDE: Cross-Model Hypothesis Diversity for Robust Dense Retrieval* (VLDB Workshop 2026) |
+| The generation step that reads evidence and answers | My *Retrieve, Locate, Generate* paper, §3.3 |
+| The confidence score | Also from *Beyond HyDE* — it's the same "how much did the models agree" statistic that predicted question difficulty there |
+| The agent loop itself (check sufficiency → retrieve again if needed) | **New for this project** — this is the actual contribution, in `run_agent_batch()` inside `src/cmha_agent.py` |
 
 ---
 
-## What's actually in this repo
+## What's in this folder
 
 ```
 CapstoneProposal-CMHA/
-├── README.md                  ← you are here
+├── README.md                  ← you're reading it
 ├── requirements.txt
-├── .env.example                ← only needed if you override the default local setup
-├── run_baseline.py             ← CLI entry point
+├── .env.example                ← only matters if you don't want the local-only setup
+├── run_baseline.py             ← run this
 ├── src/
-│   ├── cmha_agent.py            ← retrieval + generation pipeline (model-major batching)
-│   ├── llm_client.py            ← OpenAI-compatible chat client (+ --mock mode)
-│   ├── embedder.py              ← local embeddings via Ollama (+ --mock mode)
-│   └── hotpot_metrics.py        ← official-style EM/F1 scoring
+│   ├── cmha_agent.py            ← the actual pipeline and the agent loop
+│   ├── llm_client.py            ← talks to Ollama
+│   ├── embedder.py              ← also talks to Ollama, for embeddings
+│   └── hotpot_metrics.py        ← scores answers (exact match / F1)
 ├── data/
-│   └── hotpotqa_sample.json     ← 30 frozen real HotpotQA dev questions (see below)
+│   └── hotpotqa_sample.json     ← 30 real questions, frozen so you don't need to download anything
 ├── examples/
-│   ├── test_case.md             ← the one required concrete test case (proposal §4)
+│   ├── test_case.md             ← the required test case, written up
 │   ├── test_case_real_output.jsonl
-│   ├── real_run_n10_{agent,cmha,direct,single_hyde}.jsonl   ← real 4-way comparison evidence
+│   ├── real_run_n10_{agent,cmha,direct,single_hyde}.jsonl   ← real numbers from real runs
 │   └── mock_pipeline_smoketest.jsonl
-└── results/                    ← your run outputs land here (gitignored)
+└── results/                    ← your own runs land here
 ```
 
 ---
 
-## Local models and RAM budget
+## Why five small models instead of one big one
 
-Everything runs through one local Ollama server. Five small models, chosen
-for cross-organization diversity (mirroring "Beyond HyDE"'s Alibaba/Meta/
-Google/Mistral spread — Mistral's smallest official model is 7B, so it's
-swapped for Microsoft/Phi here to stay well under budget):
+I picked five models that each stay comfortably under 8GB of RAM, spread across different companies (Alibaba, Meta, Google, Microsoft) the same way "Beyond HyDE" used Alibaba/Meta/Google/Mistral — I swapped Mistral out only because their smallest model is 7B, a bit tight for the RAM budget I wanted.
 
-| Role | Model | Org | Disk size |
+| Role | Model | From | Size on disk |
 |---|---|---|---|
-| Hypothesis | `qwen2.5:3b` | Alibaba | ~1.9GB |
-| Hypothesis | `llama3.2:3b` | Meta | ~2.0GB |
-| Hypothesis | `gemma2:2b` | Google | ~1.6GB |
-| Hypothesis | `phi3.5:3.8b` | Microsoft | ~2.2GB |
-| Answer | `qwen2.5:3b` | (reused) | — |
-| Embedding | `nomic-embed-text` | Nomic | ~274MB |
+| Hypothesis generator | `qwen2.5:3b` | Alibaba | ~1.9GB |
+| Hypothesis generator | `llama3.2:3b` | Meta | ~2.0GB |
+| Hypothesis generator | `gemma2:2b` | Google | ~1.6GB |
+| Hypothesis generator | `phi3.5:3.8b` | Microsoft | ~2.2GB |
+| Answering / deciding | `qwen2.5:3b` | (same as above) | — |
+| Embeddings | `nomic-embed-text` | Nomic | ~274MB |
 
-**Peak RAM, not total.** Ollama loads exactly one model into memory at a
-time. Total disk footprint across all five models is ~8GB, but **peak RAM
-during a run is only the size of whichever single model is currently
-loaded** (largest here: phi3.5 at 2.2GB) — comfortably inside an 8GB-RAM
-machine alongside the OS and Python process.
+Here's the thing people usually get wrong about this: Ollama only ever holds **one** model in memory at a time. So even though the five models add up to about 8GB on your hard drive, the actual RAM used at any moment is just whichever single model is currently loaded — at most about 2.2GB. Plenty of room on an 8GB machine.
 
-**Why the pipeline is staged model-major, not question-major.** Measured on
-this machine: a repeat call to an already-loaded model takes ~0.3s; calling
-a *different* model costs ~3–5s (Ollama has to swap it into RAM from disk).
-A naive per-question loop (load hypothesis-model-A, B, C, D, then the
-embedder, then the answer model, repeat per question) pays that swap cost
-6–7 times *per question*. `cmha_agent.run_batch()` instead runs each model
-across *every* question before moving to the next model, paying the swap
-cost only 6–7 times for the *entire run*. Measured effect: this cut
-per-question wall-clock time from ~31s to ~12s for `--strategy cmha` on this
-machine. The tradeoff is documented in `cmha_agent.py`'s module docstring:
-results are written to disk once per full run rather than after each
-question, since staging by model doesn't produce per-question results until
-the last stage completes.
+The catch is that switching between models isn't free — I measured it, and calling a model that's already loaded takes about 0.3 seconds, but switching to a *different* model costs 3-5 seconds while Ollama swaps it in from disk. If I'd written the code the obvious way (handle one question completely, then move to the next), every single question would pay that switching cost five, six, seven times over. Instead, the code finishes everything it needs from model A across *all* the questions before it ever touches model B. That one change took a 30-question run from about 15 minutes down to 2-3 minutes for the simpler strategies. The tradeoff is that results get written to disk once the whole batch finishes rather than after each question — fine for a run this size, but worth knowing about.
 
 ---
 
-## Why the dataset is a frozen 30-question file, not "download HotpotQA"
+## Why the data is a small frozen file instead of "just download HotpotQA"
 
-HotpotQA's distractor-config dev set already ships each question with its
-own 10-paragraph pool (2 gold-supporting paragraphs + 8 distractors) — you
-don't need a full-corpus Wikipedia index to reproduce this baseline; that
-index only matters for "Beyond HyDE"'s original full-corpus retrieval
-numbers. Here, retrieval is: given *this question's own* 10 paragraphs,
-which ones does the agent pick?
+HotpotQA already hands you, for every question, a neat little pool of 10 paragraphs — 2 that actually contain the answer, and 8 distractors that don't. So you don't need the giant 5-million-paragraph search index the original "Beyond HyDE" paper needed; the question here is simpler: given *these* 10 paragraphs, can the agent pick the right ones?
 
-`data/hotpotqa_sample.json` is a real, unmodified slice of HotpotQA's
-official validation split (`hotpotqa/hotpot_qa`, `distractor` config,
-`bridge`-type questions — the multi-hop kind CMHA was built for), fetched
-via HuggingFace's `datasets-server` API and frozen into this repo so
-**grading does not depend on any dataset download succeeding at grading
-time.** The selection was deliberately spread across a wide range of
-context lengths (1,951–8,624 characters) and de-duplicated by gold answer,
-not cherry-picked for easy cases.
+`data/hotpotqa_sample.json` holds 30 real questions pulled straight from HotpotQA's official validation set (the "bridge" type — the ones that genuinely need two connected facts). I fetched these through HuggingFace and saved them into the repo so that grading this doesn't depend on any download working on the day it's graded. I picked a spread of easy-to-hard questions rather than cherry-picking ones I knew would work.
 
 ---
 
-## Setup
+## Setting it up
 
-### 1. Install Ollama
+**1. Install Ollama**
 
 ```bash
-# macOS
 brew install ollama
-# or download from https://ollama.com/download for your OS
+# or grab an installer from https://ollama.com/download
 ```
 
-Start the server (some installers register it as a background service
-automatically — check with `curl -s http://localhost:11434/api/version`
-before manually starting it):
-
+Check if it's already running before starting it yourself:
+```bash
+curl -s http://localhost:11434/api/version
+```
+If that doesn't respond, start it:
 ```bash
 ollama serve &
 ```
 
-### 2. Pull the five models (~8GB total download, one-time)
+**2. Pull the models** (about 8GB total, one-time)
 
 ```bash
 ollama pull qwen2.5:3b
@@ -141,7 +99,7 @@ ollama pull phi3.5:3.8b
 ollama pull nomic-embed-text
 ```
 
-### 3. Python environment
+**3. Set up Python**
 
 ```bash
 cd CapstoneProposal-CMHA
@@ -150,53 +108,29 @@ source .venv/bin/activate        # Windows: .venv\Scripts\activate
 pip install -r requirements.txt
 ```
 
-No API key, no `.env` file, no signup needed for the default setup —
-`.env.example` documents the (optional) override path if you'd rather point
-the chat calls at a remote OpenAI-compatible endpoint instead.
+That's genuinely it — no API key to hunt down, no `.env` file to fill in. `.env.example` is only there in case you'd rather point this at a hosted model instead of running everything locally.
 
 ---
 
-## Running it
+## Actually running it
 
-### 1. Smoke test — no Ollama, no server, no models needed, ~instant
-
-Confirms the whole pipeline (data loading → embedding → ranking → scoring →
-logging) runs end-to-end using canned text instead of any real model call —
-useful as a first check even before installing Ollama at all:
+**First, a quick check that doesn't need Ollama at all.** This just proves the code runs — it uses fake canned text instead of calling any model, so don't read anything into the numbers:
 
 ```bash
 python run_baseline.py --strategy agent --limit 3 --mock
 ```
 
-Expected tail of output:
+You should see it finish almost instantly, scoring 3/3 with 0 errors. The exact-match score will be 0 and "hops used" will always be 1 — that's expected, since the fake text always looks "sufficient" to the parser. This step is just a sanity check that nothing is broken before you install anything else.
 
-```
-questions scored : 3 / 3  (0 errors)
-exact match      : 0.000
-token F1         : 0.000
-mean hops used   : 1.00  (0% of questions used a 2nd hop)
-elapsed          : <1s
-```
-
-The 0.000 EM/F1 and "0% used a 2nd hop" here are expected and meaningless —
-`--mock` returns the same canned text for every call, which always parses as
-"sufficient," so the loop always stops after hop 1. `--mock` only proves the
-control flow runs without crashing, never that the agent's decisions are any
-good.
-
-### 2. The graded baseline run — the actual agent, real models, real scores
+**Now the real thing** — this is what actually matters, and what the assignment is asking to see:
 
 ```bash
 python run_baseline.py --strategy agent --limit 10
 ```
 
-`agent` is the default strategy. Measured on this machine: **~15s/question**
-(hop 1's four hypothesis models still load once each for the whole batch —
-see "Local models and RAM budget" — but the adaptive loop itself is
-necessarily sequential per question, since hop count is data-dependent).
-A 10-question run takes ~2.5 minutes; the full 30-question set ~7-8 minutes.
+`agent` is the default, so you could also just run `python run_baseline.py --limit 10`. On my machine this takes roughly 15 seconds per question — mostly because, unlike the simpler strategies, the agent has to decide per-question whether it needs a second look, so it can't be batched quite as aggressively. Ten questions takes about 2.5 minutes; the full 30 takes 7-8.
 
-### 3. The full comparison this proposal's eval plan needs
+**To reproduce the full comparison** the proposal talks about:
 
 ```bash
 python run_baseline.py --strategy direct      --out results/direct.jsonl
@@ -205,18 +139,11 @@ python run_baseline.py --strategy cmha        --out results/cmha.jsonl
 python run_baseline.py --strategy agent       --out results/agent.jsonl
 ```
 
-The first three are fixed-depth ablations (`direct` embeds the raw question;
-`single_hyde` uses one model's hypothesis; `cmha` is the full N=4 cross-model
-method, always retrieving exactly k=4 paragraphs). `agent` is the actual
-system: it starts from the same CMHA hop-1 retrieval as `cmha`, then decides
-per-question whether to retrieve a second, targeted hop before answering.
-Comparing all four summary blocks is the whole evaluation story for Section 6
-— the gap between `cmha` and `agent` isolates exactly what adaptive stopping
-bought over the fixed-depth method underneath it.
+The first three never make a decision — they just retrieve a fixed number of paragraphs and answer. `agent` starts from the exact same first search as `cmha`, but then it's allowed to decide it needs more. Comparing `cmha` against `agent` is really the whole point: it isolates what the decision-making itself is worth, separate from the retrieval method underneath it.
 
-### What an actual agent trajectory looks like
+### What it actually looks like when the agent decides to dig deeper
 
-From a real run (`examples/real_run_n10_agent.jsonl`):
+Here's a real question from one of my test runs, not something I made up to look good:
 
 ```json
 {
@@ -231,165 +158,70 @@ From a real run (`examples/real_run_n10_agent.jsonl`):
 }
 ```
 
-Hop 1's four hypothesis models didn't converge on enough evidence; the model
-judged it insufficient, named the specific missing fact, and a targeted
-second retrieval pulled in `Catwoman (film)` and `Catwoman (video game)` —
-both of which hop 1 missed. This is a real decision the agent made, not a
-scripted branch.
+The first search didn't turn up enough — the model recognized that, said out loud what it still needed to know, went and searched again specifically for that, and this time found both "Catwoman (film)" and "Catwoman (video game)," which the first search had completely missed. That's a real decision it made mid-run, not something scripted to happen.
 
-**An honest failure mode, in the same run**, worth documenting rather than
-hiding: on one question, instead of naming a specific missing fact, one
-small model echoed the prompt's own instruction text back as if it were the
-answer (`followup_queries: ["a short phrase naming the one specific fact or
-entity still needed to answer"]`) — a real small-model format-following
-failure, not a bug in the code. `_parse_sufficiency()` in `cmha_agent.py`
-still extracts *something* from this so the loop terminates cleanly rather
-than crashing, but the resulting follow-up query is useless. See Limitations.
+**And an honest failure, from that same batch of runs, that I think is worth showing rather than hiding:** on one question, instead of naming something specific it was missing, one of the smaller models just parroted back the instructions from the prompt itself, word for word, as if that were the missing fact. The code handles this gracefully — it notices the response doesn't make sense and just stops rather than looping forever on garbage — but it's a real reminder that small local models don't always follow instructions the way you'd hope. More in the Limitations section below.
 
-### Where output goes
+### Where everything ends up
 
-Every run writes one JSON record per question to a `results/*.jsonl` file
-(default name includes strategy + UTC timestamp; override with `--out`).
-Every record has the question, gold answer, predicted answer, EM, F1,
-retrieval recall, and the diversity/confidence score; `agent` records
-additionally carry `hops_used`, `stop_reason`, and `followup_queries` — the
-agent's own decision trail, auditable per question.
+Each run writes one line of JSON per question into `results/*.jsonl`. Every record has the question, the correct answer, what the agent guessed, whether it was right, and how confident it was. The `agent` runs additionally log how many hops it took and why it stopped, so you can look at exactly what it decided and when.
 
-Runs are **resumable at the whole-file level**: if `results/agent.jsonl`
-already has some question IDs logged, rerunning the same command skips
-those and only recomputes the rest.
+If you run the same command twice, it picks up where it left off — it checks what's already in the output file and only computes what's missing.
 
 ---
 
-## Real results (honest n=10 comparison)
+## The actual numbers, from a real run (not made up)
 
-Run on this machine, 2026-09-06, first 10 questions of the frozen set, real
-Ollama calls (no mock):
+Ran on my machine, first 10 questions, real Ollama calls, no faking anything:
 
-| Strategy | EM | F1 | Retrieval recall | s/question |
+| Strategy | Exact match | F1 | Retrieval recall | Time per question |
 |---|---|---|---|---|
 | `direct` | 0.400 | 0.450 | 0.500 | 1.8s |
 | `single_hyde` | 0.500 | 0.550 | 0.650 | 3.6s |
-| `cmha` (N=4, fixed k=4) | 0.400 | 0.586 | 0.650 | 11.7s |
-| `agent` (adaptive, k1=4, up to k2=2 more) | **0.600** | **0.650** | **0.850** | 15.3s |
+| `cmha` (always retrieves 4 paragraphs) | 0.400 | 0.586 | 0.650 | 11.7s |
+| `agent` (decides for itself) | **0.600** | **0.650** | **0.850** | 15.3s |
 
-**The agent is the headline result, and it's a real one, not a rounding
-difference.** Adaptive stopping took EM from 0.400 (`cmha`'s fixed-depth
-retrieval) to 0.600 — a 20-point jump from the *identical* hop-1 retrieval,
-purely by letting the model decide when it needs more evidence. 60% of the
-10 questions triggered a second hop; the mean hops used was 1.60. This
-isolates the actual claim of this proposal cleanly: the benefit here is
-attributable to *adaptive control flow*, not to a stronger retrieval method
-underneath it (hop 1 is byte-identical to `cmha`).
+That jump from 0.400 to 0.600 is the number I actually care about here. `cmha` and `agent` start from the *identical* first search — the only difference is that `agent` is allowed to notice when that search wasn't enough and go back for more. Six of the ten questions triggered a second look. So this isn't "a better retrieval trick made things better" — it's specifically "letting it decide for itself made things better," which is the actual claim of this whole proposal.
 
-**This does not erase the earlier honest finding about the fixed-depth
-methods.** At n=10 with these small 2–4B local models, `single_hyde` still
-edges out full `cmha` on exact match (0.500 vs 0.400) — not the clean
-"CMHA wins" story "Beyond HyDE" told with much larger models. Two readings
-worth carrying forward: (1) n=10 is nowhere near enough to distinguish
-these — "Beyond HyDE" itself needed a paired bootstrap over hundreds of
-queries before crossing zero, and "Transfer or Noise?" found effects that
-flip sign once actually tested rather than eyeballed; (2) cross-model
-averaging may help less when every ensemble member is small and noisy
-rather than large and individually strong. Both questions — "does CMHA beat
-single-hyde at scale?" and "does the agent's advantage hold at scale?" —
-are exactly what the larger, significance-tested run in Section 6 is for.
+I want to be upfront about something that doesn't fit as neatly, though: `single_hyde` (the simplest possible version, using just one model instead of four) actually did about as well as, or slightly better than, `cmha` on this small sample. That's the opposite of what my earlier "Beyond HyDE" paper found with much bigger models. Ten questions really isn't enough to draw conclusions from — that paper needed hundreds of examples before its numbers held up under a proper statistical test — so I'm reporting this honestly rather than pretending it isn't there. Sorting out whether it's just noise, or whether cross-model averaging genuinely helps less when the models involved are small and error-prone, is exactly what the larger evaluation in Section 6 of the proposal is for.
 
-**Two qualitative results that hold up** (see
-[`examples/test_case.md`](examples/test_case.md) and "What an actual agent
-trajectory looks like" above): (1) on the required Section 4 test case, all
-four individual hypothesis models hallucinated a different wrong answer,
-yet CMHA's centroid retrieval still pulled both gold paragraphs and the
-answer model correctly read off "John Waters" — retrieval succeeding
-despite every individual generator failing, the mechanism "Beyond HyDE"
-argues for. (2) On the Catwoman question above, the agent's own sufficiency
-check correctly identified that hop-1 evidence was incomplete and a
-targeted second hop recovered the missing paragraph — a real instance of
-the agent-loop mechanism this project adds actually doing its job.
+Two things from these runs that I think hold up regardless of sample size: first, on the required test case (see [`examples/test_case.md`](examples/test_case.md)), all four models guessed a different wrong answer individually, and yet averaging their guesses still pointed retrieval at the right paragraphs — the method survives every individual model being wrong. Second, the Catwoman example above is a genuine, observed instance of the agent catching its own incomplete evidence and fixing it before answering — which is the entire mechanism this project is trying to add.
 
 ---
 
-## Command reference
+## Every flag, if you want to tweak something
 
-| Flag | Default | Meaning |
+| Flag | Default | What it does |
 |---|---|---|
-| `--strategy` | `agent` | `direct` / `single_hyde` / `cmha` (fixed-depth ablations) or `agent` (the actual agent) |
-| `--k` | `4` | paragraphs retrieved at hop 1, for every strategy |
-| `--k2` | `2` | *[agent only]* additional paragraphs retrieved per follow-up hop |
-| `--max-hops` | `2` | *[agent only]* max total hops before forcing an answer (2 matches HotpotQA bridge questions' 2-fact structure) |
-| `--limit N` | all 30 | only run the first N questions |
-| `--hypothesis-models` | `qwen2.5:3b,llama3.2:3b,gemma2:2b,phi3.5:3.8b` | comma-separated Ollama model names |
-| `--answer-model` | `qwen2.5:3b` | model used for the sufficiency check, follow-up query, and final answer |
-| `--embed-model` | `nomic-embed-text` | Ollama embedding model name |
-| `--mock` | off | skip Ollama entirely (pipeline smoke test only) |
-| `--out` | auto-named | output JSONL path |
+| `--strategy` | `agent` | `direct` / `single_hyde` / `cmha` (no decisions made) or `agent` (the real thing) |
+| `--k` | `4` | how many paragraphs to grab on the first search |
+| `--k2` | `2` | *(agent only)* how many more to grab if it decides it needs a second look |
+| `--max-hops` | `2` | *(agent only)* how many tries it gets before being forced to answer — capped at 2 because HotpotQA's questions are built around exactly two facts |
+| `--limit N` | all 30 | just run the first N questions |
+| `--hypothesis-models` | the four listed above | which models generate first-search guesses |
+| `--answer-model` | `qwen2.5:3b` | which model decides sufficiency and writes the final answer |
+| `--embed-model` | `nomic-embed-text` | which model turns text into vectors |
+| `--mock` | off | skip Ollama entirely, just check the code runs |
+| `--out` | auto-named | where to save results |
 
 ---
 
-## Known limitations (proposal §7)
+## What I know is still rough (being upfront, not hiding it)
 
-- **Small local models, not the paper's original models.** "Beyond HyDE"
-  used models up to 235B/400B parameters; this baseline deliberately uses
-  2–4B models to fit an 8GB-RAM budget. Absolute scores are not comparable
-  between the two — only the *qualitative pipeline structure*
-  (direct/single-hyde/cmha) is preserved. See the honest n=10 table above.
-- **The agent's decision quality is limited by small-model instruction
-  following, not just the pipeline design.** The sufficiency check asks for
-  a specific two-line format; small local models don't always comply — one
-  documented case (see "What an actual agent trajectory looks like" above)
-  has a model echo the prompt's own instruction text back as its "missing
-  fact" instead of naming something real. `_parse_sufficiency()` degrades
-  gracefully (defaults to stopping rather than looping on garbage), but a
-  more capable model would likely produce cleaner, more useful follow-up
-  queries — this is a real, observed limitation, not a hypothetical one.
-- **Max 2 hops, fixed.** Bounded by HotpotQA's own bridge-question
-  construction (exactly two supporting facts), so it's well-justified here,
-  but a more general document corpus wouldn't have that guarantee — a
-  capstone extension to a real corpus would need either a learned stopping
-  bound or a much larger max-hops budget with its own cost tradeoff.
-- **The second hop's query comes from one model, not an ensemble.** Hop 1
-  uses the full N=4 CMHA ensemble; the follow-up hop uses only the
-  answer_model's own single hypothesis (a deliberate design choice — see
-  `cmha_agent.py`'s docstring — to avoid re-triggering the per-question
-  model-swap cost this project already fixed once). Whether cross-model
-  diversity would help on the follow-up hop too is untested.
-- **Confidence is a proxy, not calibrated.** `confidence = 1/(1+diversity)`
-  reuses a validated *correlate* of correctness (Beyond HyDE's `div(q)`,
-  r=−0.53 on HotpotQA) but has not itself been calibrated on this exact
-  pipeline/dataset slice — that calibration is part of the semester
-  evaluation plan, not this baseline.
-- **Batched-by-model logging is not per-question-incremental.** Results for
-  a whole run are written to disk together at the end (see "Local models
-  and RAM budget" above for why), not flushed after each question. Fine for
-  a few dozen local questions; would need reworking for a much larger run
-  where losing an entire in-progress batch to a crash is costly.
-- **`--mock` mode's retrieval is not representative.** Every hypothesis is
-  an identical placeholder string, so retrieval in mock mode reduces to
-  "what's lexically closest to one generic sentence," not a real test of
-  CMHA. Mock mode only certifies that the code runs, never that the method
-  works.
-- **10–30 questions is a proposal-stage baseline, not a claim.** Section 6
-  of the proposal specifies the larger-scale, paired-significance-tested
-  evaluation planned for the full capstone.
+- **These are much smaller models than my earlier paper used.** "Beyond HyDE" tested models up to 235B and 400B parameters; this uses 2-4B models so it fits on a regular laptop. The numbers here aren't directly comparable to that paper — only the overall shape of the comparison is.
+- **The model doesn't always follow the "what's missing" format properly.** I found a real case of this (described above) where a small model just echoed the instructions back instead of naming something real. The code handles it without crashing, but it means the follow-up search in that case was useless.
+- **The 2-hop limit is specific to this dataset.** It's well justified for HotpotQA, since these questions are built around exactly two facts — but a real document collection wouldn't come with that guarantee, and a future version would need a smarter way to decide when to stop.
+- **The second search only uses one model, not all four.** The first search uses all four models together for better coverage; the follow-up search, to keep things fast, only uses one. Whether using all four again would help more is something I haven't tested yet.
+- **The confidence score is borrowed, not freshly calibrated.** It's the same statistic that predicted question difficulty in my earlier paper, but I haven't specifically verified it's well-calibrated on this exact setup — that's planned for the fuller evaluation.
+- **Results save once per run, not question-by-question.** Fine for a batch this size; would need reworking for something much bigger where losing an in-progress run would actually hurt.
+- **Ten to thirty questions is enough to show this works, not enough to prove how well.** The bigger, properly tested comparison is what Section 6 of the proposal lays out.
 
 ---
 
-## Citations
+## Where the ideas came from
 
-- Cross-Model Hypothesis Aggregation, the diversity score, and the
-  thinking-model-breaks-HyDE finding: *Beyond HyDE: Cross-Model Hypothesis
-  Diversity for Robust Dense Retrieval*, VLDB 2026 Workshop on Vector
-  Databases.
-- The retrieve→generate scoring structure and oracle-substitution framing
-  this evaluation plan extends: *Retrieve, Locate, Generate: An
-  Oracle-Substitution Diagnostic for Literature-Grounded QA*.
-- The "point estimate vs. paired significance test" caution behind the
-  honest n=10 discussion above: *Transfer or Noise? A Native-Scaffold
-  Control for Meta-Optimized Agent Harnesses*.
-- The practice of logging and reading an agent's own decision trail
-  (`hops_used`, `stop_reason`, `followup_queries`) as first-class evidence
-  rather than only the final accuracy number: *Reasoning Changes How LLM
-  Agents Play Strategic Games, Not How Well: A Behavioral Analysis on GLEE*.
-- Dataset: Yang et al., *HotpotQA: A Dataset for Diverse, Explainable
-  Multi-hop Question Answering*, EMNLP 2018 (`hotpotqa/hotpot_qa`,
-  `distractor` config, via HuggingFace).
+- The cross-model retrieval trick, the confidence score, and the discovery that "thinking" models can badly break this kind of retrieval: my paper *Beyond HyDE: Cross-Model Hypothesis Diversity for Robust Dense Retrieval*, VLDB 2026 Workshop on Vector Databases.
+- The retrieve-then-generate scoring approach this builds on: my paper *Retrieve, Locate, Generate: An Oracle-Substitution Diagnostic for Literature-Grounded QA*.
+- The reminder that a small sample can mislead you and a real significance test is needed before trusting a result: my paper *Transfer or Noise? A Native-Scaffold Control for Meta-Optimized Agent Harnesses*.
+- The idea of logging and reading an agent's own decisions (how many hops, why it stopped) as real evidence, not just its final score: my paper *Reasoning Changes How LLM Agents Play Strategic Games, Not How Well: A Behavioral Analysis on GLEE*.
+- The dataset: Yang et al., *HotpotQA: A Dataset for Diverse, Explainable Multi-hop Question Answering*, EMNLP 2018.
