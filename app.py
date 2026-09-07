@@ -70,8 +70,8 @@ def render_sufficiency(payload):
     else:
         missing = payload["missing"] or "(no specific fact named)"
         st.warning(f"Hop {hop} sufficiency check: **insufficient**. Model says it's still missing: *{missing}*")
-    with st.expander(f"Raw model output (hop {hop})"):
-        st.code(payload["raw"] or "(call failed)")
+    st.caption(f"Raw model output (hop {hop}):")
+    st.code(payload["raw"] or "(call failed)")
 
 
 def render_answer(payload, gold_answer):
