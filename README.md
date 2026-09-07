@@ -75,6 +75,16 @@ HotpotQA already hands you, for every question, a neat little pool of 10 paragra
 
 ## Setting it up
 
+**0. Clone the repo and check your Python version**
+
+```bash
+git clone https://github.com/sidesshmore/cmha-agent-hotpotqa.git CapstoneProposal-CMHA
+cd CapstoneProposal-CMHA
+python3 --version   # need 3.10 or newer — the code uses type hints (e.g. `str | None`, `list[dict]`) that don't parse on older Python
+```
+
+If `python3 --version` shows less than 3.10, install a newer one first (e.g. `brew install python@3.12` on macOS, or from [python.org](https://python.org)) and use that instead of the system `python3` in the steps below.
+
 **1. Install Ollama**
 
 ```bash
@@ -101,10 +111,9 @@ ollama pull phi3.5:3.8b
 ollama pull nomic-embed-text
 ```
 
-**3. Set up Python**
+**3. Set up Python** (from inside `CapstoneProposal-CMHA`, if you're not there already)
 
 ```bash
-cd CapstoneProposal-CMHA
 python3 -m venv .venv
 source .venv/bin/activate        # Windows: .venv\Scripts\activate
 pip install -r requirements.txt
