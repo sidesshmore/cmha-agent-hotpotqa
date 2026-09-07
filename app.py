@@ -65,12 +65,13 @@ def render_retrieval(payload):
 
 def render_sufficiency(payload):
     hop = payload["hop"]
+    prior_hop = hop - 1
     if payload["is_sufficient"]:
-        st.success(f"Hop {hop} sufficiency check: evidence judged **sufficient** — stopping here.")
+        st.success(f"Checking evidence after hop {prior_hop}: judged **sufficient** — stopping here.")
     else:
         missing = payload["missing"] or "(no specific fact named)"
-        st.warning(f"Hop {hop} sufficiency check: **insufficient**. Model says it's still missing: *{missing}*")
-    st.caption(f"Raw model output (hop {hop}):")
+        st.warning(f"Checking evidence after hop {prior_hop}: **insufficient**, deciding to try hop {hop}. Model says it's still missing: *{missing}*")
+    st.caption(f"Raw model output (sufficiency check after hop {prior_hop}):")
     st.code(payload["raw"] or "(call failed)")
 
 
