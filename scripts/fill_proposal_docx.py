@@ -6,10 +6,14 @@ Usage:
     python scripts/fill_proposal_docx.py <path-to-blank-template> <path-to-output-docx>
 """
 
+import os
 import shutil
 import sys
 
 import docx
+from docx.shared import Inches
+
+SCREENSHOT_PATH = os.path.join(os.path.dirname(__file__), "..", "examples", "test_case_screenshot.png")
 
 
 def delete_paragraph(paragraph):
@@ -34,6 +38,12 @@ def insert_lines(anchor, lines):
     """Insert (text, style) tuples immediately before `anchor`, in order."""
     for text, style in lines:
         anchor.insert_paragraph_before(text, style=style)
+
+
+def insert_image(anchor, image_path, width_inches):
+    """Insert an image immediately before `anchor`."""
+    p = anchor.insert_paragraph_before("")
+    p.add_run().add_picture(image_path, width=Inches(width_inches))
 
 
 def main(template_path, out_path):
@@ -188,9 +198,16 @@ def main(template_path, out_path):
                 "and answered correctly.",
                 BODY,
             ),
+        ],
+    )
+    insert_image(paras[47], SCREENSHOT_PATH, width_inches=4.5)
+    insert_lines(
+        paras[47],
+        [
             (
-                "[SCREENSHOT PLACEHOLDER: a terminal screenshot of test case A, from running "
-                "`python run_baseline.py --strategy agent --limit 1`. Exact steps in examples/test_case.md.]",
+                "Terminal output from reproducing test case A (`python run_baseline.py --data /tmp/single_case.json "
+                "--strategy cmha --out examples/test_case_rerun.jsonl`, exact steps in examples/test_case.md): "
+                "exact match 1.000, retrieval recall 1.000, matching the run described above.",
                 BODY,
             ),
             (
