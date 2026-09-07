@@ -6,14 +6,10 @@ Usage:
     python scripts/fill_proposal_docx.py <path-to-blank-template> <path-to-output-docx>
 """
 
-import os
 import shutil
 import sys
 
 import docx
-from docx.shared import Inches
-
-SCREENSHOT_PATH = os.path.join(os.path.dirname(__file__), "..", "examples", "test_case_screenshot.png")
 
 
 def delete_paragraph(paragraph):
@@ -38,12 +34,6 @@ def insert_lines(anchor, lines):
     """Insert (text, style) tuples immediately before `anchor`, in order."""
     for text, style in lines:
         anchor.insert_paragraph_before(text, style=style)
-
-
-def insert_image(anchor, image_path, width_inches):
-    """Insert an image immediately before `anchor`."""
-    p = anchor.insert_paragraph_before("")
-    p.add_run().add_picture(image_path, width=Inches(width_inches))
 
 
 def main(template_path, out_path):
@@ -200,14 +190,14 @@ def main(template_path, out_path):
             ),
         ],
     )
-    insert_image(paras[47], SCREENSHOT_PATH, width_inches=4.5)
     insert_lines(
         paras[47],
         [
             (
                 "Terminal output from reproducing test case A (`python run_baseline.py --data /tmp/single_case.json "
                 "--strategy cmha --out examples/test_case_rerun.jsonl`, exact steps in examples/test_case.md): "
-                "exact match 1.000, retrieval recall 1.000, matching the run described above.",
+                "exact match 1.000, retrieval recall 1.000, matching the run described above. Full screenshot in "
+                "the repo README.",
                 BODY,
             ),
             (
@@ -234,10 +224,9 @@ def main(template_path, out_path):
         paras[59],
         [
             (
-                "You'll need Python 3.10 or newer and Ollama installed (free, runs locally). The Python side "
-                "only needs two small packages, requests and numpy, listed in requirements.txt, and Ollama "
-                "needs five small models pulled once, about 8GB total on disk. No API key or account is "
-                "needed anywhere; everything runs on your own machine.",
+                "You'll need Python 3.10+ and Ollama installed locally, free, no API key required. Python "
+                "needs just requests and numpy (requirements.txt); Ollama needs five small models pulled "
+                "once, about 8GB total on disk.",
                 BODY,
             ),
             (
@@ -252,10 +241,9 @@ def main(template_path, out_path):
                 BODY,
             ),
             (
-                "One real setup cost worth knowing about: the first run downloads about 8GB of models, and "
-                "because the agent has to decide per-question whether it needs a second look, a full 30-question "
-                "run takes roughly 7-8 minutes rather than being instant. Full setup steps and troubleshooting "
-                "are in README.md.",
+                "One real setup cost: the first run downloads about 8GB of models, and since the agent "
+                "decides per-question whether to search again, a full 30-question run takes roughly 7-8 "
+                "minutes. Full setup and troubleshooting steps are in README.md.",
                 BODY,
             ),
         ],
@@ -272,22 +260,16 @@ def main(template_path, out_path):
                 "fixed amount and never decide anything, and the actual agent. That comparison tells me "
                 "whether the gain comes from letting the model decide, not from a better retrieval trick. On a "
                 "real 10-question run: direct scored 0.400 exact match, single_hyde 0.500, cmha 0.400, and "
-                "agent 0.600, with 60% of questions triggering a second search. Since the agent's first search "
-                "is identical to cmha's, that jump is specifically what the decision-making is worth.",
+                "agent 0.600, with 60% of questions triggering a second search. That jump reflects the "
+                "decision-making alone, since agent's first search is identical to cmha's.",
                 BODY,
             ),
             (
-                "Going forward I'll track EM/F1 and retrieval recall across all four versions; for the agent, "
-                "whether a second look actually correlates with getting the answer right rather than just "
-                "adding noise; how well its confidence tracks correctness; and the extra cost in model calls "
-                "and time.",
-                BODY,
-            ),
-            (
-                "Most importantly, I want a real statistical test rather than trusting small numbers. Ten "
-                "questions already produced one surprising result, with single_hyde matching the full method, "
-                "and I don't want to draw conclusions from a sample that small. The full evaluation will use a "
-                "paired significance test over a much larger question set, the same approach from my earlier work.",
+                "Going forward I'll track EM/F1, retrieval recall, whether a second look correlates with "
+                "correctness, and the extra cost in model calls and time. Most importantly, I want a real "
+                "statistical test rather than trusting small numbers, since ten questions already produced "
+                "one surprising result (single_hyde matching the full method); the full evaluation will use "
+                "a paired significance test over a larger question set, as in my earlier work.",
                 BODY,
             ),
         ],
@@ -300,23 +282,14 @@ def main(template_path, out_path):
         paras[82],
         [
             (
-                "The biggest weakness is that the model doesn't always describe what's missing in a usable "
-                "way. Small local models aren't perfectly reliable at following that instruction, and I've "
-                "already seen it fail. The two-hop limit is also dataset-specific: it works because HotpotQA "
-                "needs exactly two facts, but a general document collection wouldn't guarantee that. And the "
-                "follow-up search uses one model instead of all four, to stay fast.",
-                BODY,
-            ),
-            (
-                "I expect failures where the model is confidently wrong about having enough evidence, or its "
-                "second search is built on a mistaken guess about what's missing.",
-                BODY,
-            ),
-            (
+                "The biggest weakness: the model doesn't always describe what's missing in a usable way, "
+                "and I've already seen it fail. The two-hop limit is also dataset-specific, since it works "
+                "because HotpotQA needs exactly two facts, but a general document collection wouldn't "
+                "guarantee that. I also expect failures where the model is confidently wrong about having "
+                "enough evidence, or its second search is built on a mistaken guess about what's missing. "
                 "Next: the larger statistical evaluation from Section 6, a more reliable sufficiency check, "
-                "and possibly a bigger document collection or live web search if time allows. The main risk is "
-                "that small models may just cap how good this gets. I have access to ASU's Sol HPC cluster if "
-                "more compute becomes necessary.",
+                "and possibly a bigger document collection or live web search, using ASU's Sol HPC cluster "
+                "if more compute is needed.",
                 BODY,
             ),
         ],

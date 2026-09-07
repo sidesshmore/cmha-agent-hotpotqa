@@ -187,6 +187,10 @@ I want to be upfront about something that doesn't fit as neatly, though: `single
 
 Two things from these runs that I think hold up regardless of sample size: first, on the required test case (see [`examples/test_case.md`](examples/test_case.md)), all four models guessed a different wrong answer individually, and yet averaging their guesses still pointed retrieval at the right paragraphs — the method survives every individual model being wrong. Second, the Catwoman example above is a genuine, observed instance of the agent catching its own incomplete evidence and fixing it before answering — which is the entire mechanism this project is trying to add.
 
+Here's the actual terminal output from reproducing that test case (`python run_baseline.py --data /tmp/single_case.json --strategy cmha --out examples/test_case_rerun.jsonl`, exact steps in [`examples/test_case.md`](examples/test_case.md)):
+
+![Terminal output for test case A: exact match 1.000, retrieval recall 1.000](examples/test_case_screenshot.png)
+
 ---
 
 ## Every flag, if you want to tweak something
