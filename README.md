@@ -112,6 +112,8 @@ pip install -r requirements.txt
 
 That's genuinely it — no API key to hunt down, no `.env` file to fill in. `.env.example` is only there in case you'd rather point this at a hosted model instead of running everything locally.
 
+If you also want the optional Streamlit demo (watch the agent work through one question live — see below), install one more small file: `pip install -r requirements-app.txt`.
+
 ---
 
 ## Actually running it

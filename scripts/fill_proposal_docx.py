@@ -243,7 +243,8 @@ def main(template_path, out_path):
             (
                 "One real setup cost: the first run downloads about 8GB of models, and since the agent "
                 "decides per-question whether to search again, a full 30-question run takes roughly 7-8 "
-                "minutes. Full setup and troubleshooting steps are in README.md.",
+                "minutes. Full setup and troubleshooting steps are in README.md. There's also an optional "
+                "Streamlit app (app.py) that runs the same agent loop on one question at a time, live.",
                 BODY,
             ),
         ],
