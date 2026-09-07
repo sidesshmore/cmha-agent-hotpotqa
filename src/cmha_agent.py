@@ -458,3 +458,150 @@ def run_agent_batch(
             record["partial_errors"] = errors[iid]
         results.append(record)
     return results
+
+
+def run_agent_single(
+    item: dict,
+    embedder: Embedder,
+    llm: LLMClient,
+    hypothesis_models: list[str],
+    answer_model: str,
+    k1: int,
+    k2: int,
+    max_hops: int,
+    on_event=None,
+) -> dict:
+    """Same agent loop as run_agent_batch, but for one question, calling
+    on_event(kind, payload) as each step happens so a caller (e.g. a
+    Streamlit UI) can render the trace live instead of only seeing the
+    final record.
+
+    Deliberately not model-major (see run_agent_batch's docstring on why
+    that matters for a full run's total swap cost) — for a single
+    interactive question there's nothing to batch, so the simpler
+    sequential form is used here instead.
+    """
+
+    def emit(kind, **payload):
+        if on_event:
+            on_event(kind, payload)
+
+    errors: list[str] = []
+    para_texts = [f"{p['title']}: {p['text']}" for p in item["paragraphs"]]
+    para_vecs = embedder.embed(para_texts)
+
+    hyps = []
+    for model in hypothesis_models:
+        try:
+            h = llm.complete(model, HYPOTHESIS_PROMPT.format(q=item["question"]), max_tokens=120, temperature=0.7)
+        except Exception as e:
+            h = None
+            errors.append(f"hypothesis[{model}]: {e}")
+        emit("hypothesis", model=model, text=h)
+        if h:
+            hyps.append(h)
+
+    if hyps:
+        hyp_vecs = embedder.embed(hyps)
+        query_vec = _centroid(hyp_vecs)
+        diversity = _diversity_score(hyp_vecs)
+    else:
+        query_vec = embedder.embed([item["question"]])[0]
+        diversity = 0.0
+
+    idx = _rank_indices(para_vecs, query_vec, k1)
+    evidence = _build_evidence(item, idx)
+    emit("retrieval", hop=1, evidence=evidence)
+
+    hops_used = 1
+    stop_reason = "max_hops_reached"
+    followup_queries: list[str] = []
+
+    for hop in range(2, max_hops + 1):
+        try:
+            check = llm.complete(
+                answer_model,
+                SUFFICIENCY_PROMPT.format(evidence=evidence["evidence_block"], q=item["question"]),
+                max_tokens=60,
+                temperature=0.0,
+            )
+            is_sufficient, missing = _parse_sufficiency(check)
+        except Exception as e:
+            errors.append(f"sufficiency[hop{hop}]: {e}")
+            check, is_sufficient, missing = None, True, None
+        emit("sufficiency", hop=hop, raw=check, is_sufficient=is_sufficient, missing=missing)
+
+        if is_sufficient or not missing:
+            stop_reason = "sufficient" if is_sufficient else "no_missing_fact_named"
+            break
+
+        followup_queries.append(missing)
+        try:
+            followup_hyp = llm.complete(
+                answer_model,
+                FOLLOWUP_HYPOTHESIS_PROMPT.format(missing=missing),
+                max_tokens=60,
+                temperature=0.7,
+            )
+            followup_vec = embedder.embed([followup_hyp])[0]
+        except Exception as e:
+            errors.append(f"followup[hop{hop}]: {e}")
+            stop_reason = "followup_call_failed"
+            emit("followup_failed", hop=hop, missing=missing)
+            break
+
+        new_idx = _rank_indices(para_vecs, followup_vec, k2, exclude=set(idx))
+        if not new_idx:
+            stop_reason = "no_more_paragraphs_available"
+            emit("followup_empty", hop=hop, missing=missing)
+            break
+        idx.extend(new_idx)
+        evidence = _build_evidence(item, idx)
+        hops_used = hop
+        emit("retrieval", hop=hop, evidence=evidence, followup_hypothesis=followup_hyp, missing=missing)
+
+    try:
+        predicted = llm.complete(
+            answer_model,
+            ANSWER_PROMPT.format(evidence=evidence["evidence_block"], q=item["question"]),
+            max_tokens=32,
+            temperature=0.0,
+        )
+    except Exception as e:
+        errors.append(f"answer: {e}")
+        predicted = None
+    emit("answer", predicted=predicted)
+
+    if predicted is None:
+        record = {
+            "id": item["id"],
+            "question": item["question"],
+            "error": "; ".join(errors) if errors else "unknown error",
+            "strategy": "agent",
+        }
+        emit("done", record=record)
+        return record
+
+    confidence = 1.0 / (1.0 + diversity)
+    record = {
+        "id": item["id"],
+        "question": item["question"],
+        "gold_answer": item["answer"],
+        "predicted_answer": predicted,
+        "em": exact_match_score(predicted, item["answer"]),
+        "f1": round(f1_score(predicted, item["answer"]), 4),
+        "retrieval_recall": evidence["retrieval_recall"],
+        "retrieved_titles": evidence["retrieved_titles"],
+        "gold_titles": evidence["gold_titles"],
+        "diversity_score": round(diversity, 4),
+        "confidence": round(confidence, 4),
+        "hypotheses": hyps,
+        "hops_used": hops_used,
+        "stop_reason": stop_reason,
+        "followup_queries": followup_queries,
+        "strategy": "agent",
+    }
+    if errors:
+        record["partial_errors"] = errors
+    emit("done", record=record)
+    return record

@@ -27,6 +27,8 @@ CapstoneProposal-CMHA/
 ├── requirements.txt
 ├── .env.example                ← only matters if you don't want the local-only setup
 ├── run_baseline.py             ← run this
+├── app.py                      ← optional Streamlit demo, watch the agent think on one question at a time
+├── requirements-app.txt        ← only needed for app.py
 ├── src/
 │   ├── cmha_agent.py            ← the actual pipeline and the agent loop
 │   ├── llm_client.py            ← talks to Ollama
@@ -165,6 +167,17 @@ In that same batch of runs, one question went the other way: instead of naming s
 ### Where everything ends up
 
 Each run writes one line of JSON per question into `results/*.jsonl`. Every record has the question, the correct answer, what the agent guessed, whether it was right, and how confident it was. The `agent` runs additionally log how many hops it took and why it stopped, so you can look at exactly what it decided and when.
+
+### Optional: watch it think, one question at a time
+
+`run_baseline.py` is built for scoring a batch of questions, so the actual decision-making happens invisibly in the middle of a loop. If you'd rather watch a single question go through the loop step by step, there's a small Streamlit app for that:
+
+```bash
+pip install -r requirements.txt -r requirements-app.txt
+streamlit run app.py
+```
+
+Pick any of the 30 frozen questions from the sidebar and click **Run agent**. It shows each hypothesis as the four models generate it, the paragraphs retrieved in hop 1, the model's own sufficiency check (including its raw two-line STATUS/MISSING output), a second retrieval hop if it decides it needs one, and the final answer against the gold answer. It calls the exact same `run_agent_single()` function in `src/cmha_agent.py` that the batch pipeline uses underneath, just one question at a time instead of model-major batched, so it's a view into the same agent, not a separate reimplementation. There's a "Mock mode" checkbox in the sidebar if you want to click through the UI without Ollama running first — same caveat as `--mock` above, the answers won't mean anything in that mode.
 
 If you run the same command twice, it picks up where it left off — it checks what's already in the output file and only computes what's missing.
 
